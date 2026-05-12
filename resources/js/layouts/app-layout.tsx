@@ -1,4 +1,4 @@
-import AppLayoutTemplate from '@/layouts/app/app-sidebar-layout';
+import { Breadcrumbs } from '@/components/breadcrumbs';
 import { type BreadcrumbItem } from '@/types';
 import { type ReactNode } from 'react';
 
@@ -8,7 +8,15 @@ interface AppLayoutProps {
 }
 
 export default ({ children, breadcrumbs, ...props }: AppLayoutProps) => (
-    <AppLayoutTemplate breadcrumbs={breadcrumbs} {...props}>
-        {children}
-    </AppLayoutTemplate>
+    <main
+        className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8"
+        {...props}
+    >
+        <div className="mx-auto w-full max-w-5xl space-y-6">
+            {breadcrumbs && breadcrumbs.length > 0 && (
+                <Breadcrumbs breadcrumbs={breadcrumbs} />
+            )}
+            {children}
+        </div>
+    </main>
 );

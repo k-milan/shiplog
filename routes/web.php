@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\GitHubAppController;
+use App\Http\Controllers\GitHubWebhookController;
 use App\Http\Controllers\SessionController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UserEmailResetNotification;
@@ -12,9 +13,20 @@ use App\Http\Controllers\UserPasswordController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\UserTwoFactorAuthenticationController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
-Route::get('/', fn () => Inertia::render('welcome'))->name('home');
+Route::get('/', [GitHubAppController::class, 'index'])->name('home');
+
+// GitHub App Installations...
+Route::get('settings/github', [GitHubAppController::class, 'index'])
+    ->name('github-apps.index');
+Route::get('github/redirect', [GitHubAppController::class, 'redirect'])
+    ->name('github-apps.redirect');
+Route::get('github/callback', [GitHubAppController::class, 'callback'])
+    ->name('github-apps.callback');
+Route::post('github/webhook', GitHubWebhookController::class)
+    ->name('github-apps.webhook');
+Route::delete('settings/github/{installation}', [GitHubAppController::class, 'destroy'])
+    ->name('github-apps.destroy');
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::get('dashboard', fn () => Inertia::render('dashboard'))->name('dashboard');
@@ -42,15 +54,6 @@ Route::middleware('auth')->group(function (): void {
     Route::get('settings/two-factor', [UserTwoFactorAuthenticationController::class, 'show'])
         ->name('two-factor.show');
 
-    // GitHub App Installations...
-    Route::get('settings/github', [GitHubAppController::class, 'index'])
-        ->name('github-apps.index');
-    Route::get('github/redirect', [GitHubAppController::class, 'redirect'])
-        ->name('github-apps.redirect');
-    Route::get('github/callback', [GitHubAppController::class, 'callback'])
-        ->name('github-apps.callback');
-    Route::delete('settings/github/{installation}', [GitHubAppController::class, 'destroy'])
-        ->name('github-apps.destroy');
 });
 
 Route::middleware('guest')->group(function (): void {

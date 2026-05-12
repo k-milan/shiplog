@@ -233,7 +233,7 @@ export default function Welcome() {
                                     />
                                 </g>
                                 <g
-                                    /** @ts-expect-error 'plus-darker' doesn't seem to be defined in the 'csstype' module */
+                                    /** @ts-ignore 'plus-darker' is valid CSS but may be missing from some csstype versions */
                                     style={{ mixBlendMode: 'plus-darker' }}
                                     className="translate-y-0 opacity-100 transition-all delay-300 duration-750 starting:translate-y-4 starting:opacity-0"
                                 >

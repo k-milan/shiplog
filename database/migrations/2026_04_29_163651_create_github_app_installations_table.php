@@ -12,7 +12,7 @@ return new class extends Migration
     {
         Schema::create('github_app_installations', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
             $table->bigInteger('installation_id')->unique();
             $table->string('account_login');
             $table->string('account_type');

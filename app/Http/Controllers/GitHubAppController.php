@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Actions\BackfillGitHubInstallation;
 use App\Actions\ConnectGitHubApp;
 use App\Actions\DisconnectGitHubApp;
 use App\Contracts\GitHubAppTokenContract;
 use App\Models\GitHubAppInstallation;
-use App\Models\User;
+use App\Models\GitHubCommit;
+use App\Models\GitHubPullRequest;
+use App\Models\GitHubPullRequestReview;
+use App\Models\GitHubRepository;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -19,17 +23,44 @@ final readonly class GitHubAppController
 {
     public function __construct(
         private ConnectGitHubApp $connectGitHubApp,
+        private BackfillGitHubInstallation $backfillGitHubInstallation,
         private DisconnectGitHubApp $disconnectGitHubApp,
         private GitHubAppTokenContract $tokenService,
     ) {}
 
-    public function index(Request $request): Response
+    public function index(): Response
     {
         return Inertia::render('settings/github/index', [
-            'installations' => $request->user()
-                ->githubAppInstallations()
+            'installations' => GitHubAppInstallation::query()
                 ->orderBy('account_login')
                 ->get(['id', 'installation_id', 'account_login', 'account_type', 'account_name', 'avatar_url', 'created_at']),
+            'summary' => [
+                'repositories' => GitHubRepository::query()->count(),
+                'commits' => GitHubCommit::query()->count(),
+                'pull_requests' => GitHubPullRequest::query()->count(),
+                'reviews' => GitHubPullRequestReview::query()->count(),
+            ],
+            'repositories' => GitHubRepository::query()
+                ->withCount(['commits', 'pullRequests'])
+                ->orderByDesc('pushed_at')
+                ->limit(8)
+                ->get(['id', 'full_name', 'private', 'default_branch', 'html_url', 'pushed_at']),
+            'recentCommits' => Inertia::scroll(
+                GitHubCommit::query()
+                    ->with('repository:id,full_name')
+                    ->orderByDesc('authored_at')
+                    ->paginate(10, ['id', 'github_repository_id', 'sha', 'message', 'author_login', 'author_name', 'authored_at', 'html_url'], 'commits')
+            ),
+            'recentPullRequests' => GitHubPullRequest::query()
+                ->with('repository:id,full_name')
+                ->orderByDesc('updated_at_github')
+                ->limit(8)
+                ->get(['id', 'github_repository_id', 'number', 'title', 'state', 'draft', 'author_login', 'html_url', 'opened_at', 'updated_at_github', 'merged_at']),
+            'recentReviews' => GitHubPullRequestReview::query()
+                ->with('pullRequest:id,github_repository_id,number,title')
+                ->orderByDesc('submitted_at')
+                ->limit(8)
+                ->get(['id', 'github_pull_request_id', 'state', 'author_login', 'body', 'html_url', 'submitted_at']),
         ]);
     }
 
@@ -57,16 +88,15 @@ final readonly class GitHubAppController
                 ->with('status', 'github-app-error');
         }
 
-        $this->connectGitHubApp->handle($request->user(), $installationData);
+        $installation = $this->connectGitHubApp->handle($installationData);
+        $this->backfillGitHubInstallation->handle($installation);
 
         return to_route('github-apps.index')
             ->with('status', 'github-app-connected');
     }
 
-    public function destroy(Request $request, GitHubAppInstallation $installation): RedirectResponse
+    public function destroy(GitHubAppInstallation $installation): RedirectResponse
     {
-        $this->authorizeOwnership($request->user(), $installation);
-
         $this->disconnectGitHubApp->handle($installation);
 
         return to_route('github-apps.index')
@@ -98,10 +128,5 @@ final readonly class GitHubAppController
             'account_name' => $data['account']['name'] ?? null,
             'avatar_url' => $data['account']['avatar_url'] ?? null,
         ];
-    }
-
-    private function authorizeOwnership(User $user, GitHubAppInstallation $installation): void
-    {
-        abort_if($installation->user_id !== $user->id, 403);
     }
 }

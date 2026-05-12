@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
-use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -20,7 +19,7 @@ final class GitHubAppInstallationFactory extends Factory
         $login = fake()->userName();
 
         return [
-            'user_id' => User::factory(),
+            'user_id' => null,
             'installation_id' => fake()->unique()->numberBetween(1000000, 9999999),
             'account_login' => $login,
             'account_type' => fake()->randomElement(['User', 'Organization']),

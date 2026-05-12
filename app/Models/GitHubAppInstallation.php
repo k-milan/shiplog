@@ -9,10 +9,11 @@ use Database\Factories\GitHubAppInstallationFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property-read int $id
- * @property-read int $user_id
+ * @property-read int|null $user_id
  * @property-read int $installation_id
  * @property-read string $account_login
  * @property-read string $account_type
@@ -66,6 +67,14 @@ final class GitHubAppInstallation extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * @return HasMany<GitHubRepository, $this>
+     */
+    public function repositories(): HasMany
+    {
+        return $this->hasMany(GitHubRepository::class, 'github_app_installation_id');
     }
 
     public function isTokenExpired(): bool

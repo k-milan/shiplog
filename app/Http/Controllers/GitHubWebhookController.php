@@ -98,8 +98,6 @@ final readonly class GitHubWebhookController
                 'repositories_added_count' => count($repositories),
                 'exception' => $exception->getMessage(),
             ]);
-
-            throw $exception;
         }
     }
 

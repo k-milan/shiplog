@@ -126,10 +126,14 @@ final readonly class BackfillGitHubInstallation
 
     private function client(string $token): PendingRequest
     {
-        return Http::withToken($token)->withHeaders([
-            'Accept' => 'application/vnd.github+json',
-            'X-GitHub-Api-Version' => '2022-11-28',
-        ]);
+        return Http::withToken($token)
+            ->connectTimeout(10)
+            ->timeout(30)
+            ->retry(2, 500)
+            ->withHeaders([
+                'Accept' => 'application/vnd.github+json',
+                'X-GitHub-Api-Version' => '2022-11-28',
+            ]);
     }
 
     /**

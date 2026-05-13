@@ -238,19 +238,27 @@ export default function GitHubIndex({
                                 repositories={todayActivityByRepository}
                             />
 
-                            <Last7DaysActivityChart data={last7DaysActivity} />
+                            <div className="grid items-start gap-6 lg:grid-cols-2">
+                                <div className="space-y-6">
+                                    <Last7DaysActivityChart
+                                        data={last7DaysActivity}
+                                    />
 
-                            <ActivityHeatmapPanel heatmap={activityHeatmap} />
+                                    <ActivityHeatmapPanel
+                                        heatmap={activityHeatmap}
+                                    />
+                                </div>
 
-                            <section className="min-w-0">
-                                <h2 className="mb-3 font-mono text-sm font-semibold">
-                                    Last 24 Hours
-                                </h2>
-                                <ActivityTimeline
-                                    items={activityItemsData}
-                                    newItemIds={newActivityItemIds}
-                                />
-                            </section>
+                                <section className="min-w-0 lg:sticky lg:top-6">
+                                    <h2 className="mb-3 font-mono text-sm font-semibold">
+                                        Last 24 Hours
+                                    </h2>
+                                    <ActivityTimeline
+                                        items={activityItemsData}
+                                        newItemIds={newActivityItemIds}
+                                    />
+                                </section>
+                            </div>
                         </>
                     )}
                 </div>
@@ -643,6 +651,23 @@ function ActivityTimeline({
     items: ActivityItem[];
     newItemIds: Set<string>;
 }) {
+    if (items.length === 0) {
+        return (
+            <div className="flex min-h-[22rem] items-center justify-center rounded-md border border-dashed bg-background/20 px-6 py-10 text-center">
+                <div>
+                    <GitCommitHorizontal className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
+                    <p className="font-mono text-sm font-medium">
+                        No activity in the last 24 hours
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        New commits, pull requests, and reviews will stream in
+                        here.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div
             className="relative [--timeline-color:theme(colors.green.500)]"
@@ -655,7 +680,7 @@ function ActivityTimeline({
             <ScrollFade
                 axis="vertical"
                 intensity={0.85}
-                className="max-h-[34rem] px-3"
+                className="max-h-[50rem] px-3"
             >
                 <InfiniteScroll
                     data="activityItems"

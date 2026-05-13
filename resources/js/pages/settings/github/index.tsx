@@ -1,9 +1,17 @@
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ChartContainer } from '@/components/ui/chart';
+import { Heatmap } from '@/components/ui/heatmap';
+import {
+    PartitionBar,
+    PartitionBarSegment,
+    PartitionBarSegmentTitle,
+    PartitionBarSegmentValue,
+} from '@/components/ui/partition-bar';
+import { ScrollFade } from '@/components/ui/scroll-fade';
 import { destroy, redirect } from '@/routes/github-apps';
-import { Form, Head, InfiniteScroll } from '@inertiajs/react';
+import { Form, Head, InfiniteScroll, usePoll } from '@inertiajs/react';
 import {
     GitBranch,
     GitCommitHorizontal,
@@ -12,7 +20,15 @@ import {
     Plus,
     Trash2,
 } from 'lucide-react';
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+    Area,
+    AreaChart,
+    CartesianGrid,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
 
 interface GitHubInstallation {
     id: number;
@@ -24,35 +40,52 @@ interface GitHubInstallation {
     created_at: string;
 }
 
-interface Summary {
-    repositories: number;
-    commits: number;
-    pull_requests: number;
-    reviews: number;
+interface Last24HoursSummary {
+    activities: number;
+    repos_touched: number;
+    prs_updated: number;
+    prs_merged: number;
+    production_deploys: number | null;
 }
 
-interface Repository {
-    id: number;
-    full_name: string;
-    private: boolean;
-    default_branch: string | null;
-    html_url: string;
-    pushed_at: string | null;
-    commits_count: number;
-    pull_requests_count: number;
+interface ActivityChartPoint {
+    date: string;
+    label: string;
+    total: number;
 }
 
-interface Commit {
-    id: number;
-    sha: string;
-    message: string | null;
-    author_login: string | null;
-    author_name: string | null;
-    authored_at: string | null;
-    html_url: string | null;
-    repository: {
-        full_name: string;
-    };
+interface ActivityHeatmap {
+    start_date: string;
+    end_date: string;
+    total: number;
+    data: {
+        date: string;
+        value: number;
+    }[];
+}
+
+interface RepositoryActivityPartition {
+    repository: string;
+    total: number;
+}
+
+interface BackgroundControls {
+    dotColor: string;
+    dotOpacity: number;
+    dotSize: number;
+    gridSpacing: number;
+}
+
+interface ActivityItem {
+    id: string;
+    type: 'commit' | 'pull_request' | 'review';
+    occurred_at: string | null;
+    title: string;
+    actor: string | null;
+    repository: string | null;
+    reference: string | null;
+    url: string | null;
+    state: string | null;
 }
 
 interface Paginated<T> {
@@ -90,9 +123,11 @@ interface Review {
 
 interface Props {
     installations: GitHubInstallation[];
-    summary: Summary;
-    repositories: Repository[];
-    recentCommits: Paginated<Commit>;
+    last24HoursSummary: Last24HoursSummary;
+    last7DaysActivity: ActivityChartPoint[];
+    activityHeatmap: ActivityHeatmap;
+    todayActivityByRepository: RepositoryActivityPartition[];
+    activityItems: Paginated<ActivityItem>;
     recentPullRequests: PullRequest[];
     recentReviews: Review[];
     status?: string;
@@ -100,24 +135,87 @@ interface Props {
 
 export default function GitHubIndex({
     installations,
-    summary,
-    repositories,
-    recentCommits,
+    last24HoursSummary,
+    last7DaysActivity,
+    activityHeatmap,
+    todayActivityByRepository,
+    activityItems,
     recentPullRequests,
     recentReviews,
     status,
 }: Props) {
-    const hasData =
-        summary.repositories > 0 ||
-        summary.commits > 0 ||
-        summary.pull_requests > 0 ||
-        summary.reviews > 0;
+    const previousActivityIds = useRef<string[] | null>(null);
+    const animationTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [newActivityItemIds, setNewActivityItemIds] = useState<Set<string>>(
+        () => new Set(),
+    );
+    const [backgroundControls, setBackgroundControls] = useState({
+        dotColor: '#ffffff',
+        dotOpacity: 7,
+        dotSize: 0.75,
+        gridSpacing: 13,
+    });
+
+    usePoll(10000, {
+        only: [
+            'activityItems',
+            'last24HoursSummary',
+            'last7DaysActivity',
+            'activityHeatmap',
+            'todayActivityByRepository',
+        ],
+        reset: ['activityItems'],
+        data: { activity: 1 },
+    });
+
+    useEffect(() => {
+        const currentIds = activityItems.data.map((item) => item.id);
+        const previousIds = previousActivityIds.current;
+
+        if (previousIds === null) {
+            previousActivityIds.current = currentIds;
+
+            return;
+        }
+
+        const previousFirstId = previousIds[0];
+        const previousFirstIndex = previousFirstId
+            ? currentIds.indexOf(previousFirstId)
+            : -1;
+        const incomingIds =
+            previousFirstIndex > 0
+                ? currentIds.slice(0, previousFirstIndex)
+                : currentIds.filter((id) => !previousIds.includes(id));
+
+        if (incomingIds.length > 0) {
+            setNewActivityItemIds(new Set(incomingIds));
+
+            if (animationTimeout.current !== null) {
+                clearTimeout(animationTimeout.current);
+            }
+
+            animationTimeout.current = setTimeout(() => {
+                setNewActivityItemIds(new Set());
+                animationTimeout.current = null;
+            }, 1200);
+        }
+
+        previousActivityIds.current = currentIds;
+    }, [activityItems.data]);
+
+    const backgroundStyle = {
+        backgroundImage: `radial-gradient(circle at 1px 1px, color-mix(in oklch, ${backgroundControls.dotColor} ${backgroundControls.dotOpacity}%, transparent) ${backgroundControls.dotSize}px, transparent 0)`,
+        backgroundSize: `${backgroundControls.gridSpacing}px ${backgroundControls.gridSpacing}px`,
+    };
 
     return (
-        <main className="min-h-screen bg-background text-foreground [background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,var(--foreground)_22%,transparent)_1px,transparent_0)] [background-size:13px_13px]">
+        <main
+            className="min-h-screen bg-background text-foreground"
+            style={backgroundStyle}
+        >
             <Head title="Shiplog" />
 
-            <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col bg-background/45 px-4 py-10 backdrop-blur-[0.5px] sm:px-6">
+            <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-10 sm:px-6">
                 <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-1">
                         <div className="flex items-center gap-2">
@@ -138,6 +236,11 @@ export default function GitHubIndex({
                         </a>
                     </Button>
                 </header>
+
+                <BackgroundTuner
+                    values={backgroundControls}
+                    onChange={setBackgroundControls}
+                />
 
                 <div className="space-y-6">
                     {status === 'github-app-connected' && (
@@ -164,62 +267,33 @@ export default function GitHubIndex({
                         <>
                             <ConnectedAccounts installations={installations} />
 
-                            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                <MetricCard
-                                    icon={<GitBranch className="h-4 w-4" />}
-                                    label="Repositories"
-                                    value={summary.repositories}
-                                />
-                                <MetricCard
-                                    icon={
-                                        <GitCommitHorizontal className="h-4 w-4" />
-                                    }
-                                    label="Commits"
-                                    value={summary.commits}
-                                />
-                                <MetricCard
-                                    icon={
-                                        <GitPullRequest className="h-4 w-4" />
-                                    }
-                                    label="Pull Requests"
-                                    value={summary.pull_requests}
-                                />
-                                <MetricCard
-                                    icon={
-                                        <MessageSquareText className="h-4 w-4" />
-                                    }
-                                    label="Reviews"
-                                    value={summary.reviews}
-                                />
-                            </section>
-
-                            {!hasData && (
+                            {last24HoursSummary.activities === 0 && (
                                 <StatusMessage>
                                     Connected, but no synced GitHub activity is
-                                    stored yet.
+                                    stored for the last 24 hours.
                                 </StatusMessage>
                             )}
 
-                            <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
-                                <Panel title="Repositories">
-                                    <div className="divide-y divide-border">
-                                        {repositories.map((repository) => (
-                                            <RepositoryRow
-                                                key={repository.id}
-                                                repository={repository}
-                                            />
-                                        ))}
-                                    </div>
-                                </Panel>
+                            <Last24HoursSummaryCards
+                                summary={last24HoursSummary}
+                            />
 
-                                <section className="min-w-0">
-                                    <h2 className="mb-3 font-mono text-sm font-semibold">
-                                        Recent Commits
-                                    </h2>
-                                    <CommitTimeline
-                                        commits={recentCommits.data}
-                                    />
-                                </section>
+                            <TodayRepositoryPartition
+                                repositories={todayActivityByRepository}
+                            />
+
+                            <Last7DaysActivityChart data={last7DaysActivity} />
+
+                            <ActivityHeatmapPanel heatmap={activityHeatmap} />
+
+                            <section className="min-w-0">
+                                <h2 className="mb-3 font-mono text-sm font-semibold">
+                                    Last 24 Hours
+                                </h2>
+                                <ActivityTimeline
+                                    items={activityItems.data}
+                                    newItemIds={newActivityItemIds}
+                                />
                             </section>
 
                             <section className="grid gap-6 lg:grid-cols-2">
@@ -272,6 +346,129 @@ function EmptyState() {
                 </a>
             </Button>
         </section>
+    );
+}
+
+function BackgroundTuner({
+    values,
+    onChange,
+}: {
+    values: BackgroundControls;
+    onChange: (values: BackgroundControls) => void;
+}) {
+    const update = <Key extends keyof BackgroundControls>(
+        key: Key,
+        value: BackgroundControls[Key],
+    ) => {
+        onChange({ ...values, [key]: value });
+    };
+
+    return (
+        <section className="mb-6 rounded-md border bg-background/60 p-3">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <h2 className="font-mono text-sm font-semibold">
+                        Background Tuner
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                        Adjust the page grid and use the values below.
+                    </p>
+                </div>
+                <code className="rounded bg-muted px-2 py-1 font-mono text-[0.68rem] text-muted-foreground">
+                    {`color ${values.dotColor} / opacity ${values.dotOpacity}% / dot ${values.dotSize}px / spacing ${values.gridSpacing}px`}
+                </code>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="space-y-1">
+                    <span className="font-mono text-[0.68rem] text-muted-foreground">
+                        dot color
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="color"
+                            value={values.dotColor}
+                            onChange={(event) =>
+                                update('dotColor', event.target.value)
+                            }
+                            className="h-8 w-10 rounded border border-border bg-transparent"
+                        />
+                        <span className="font-mono text-xs">
+                            {values.dotColor}
+                        </span>
+                    </div>
+                </label>
+
+                <BackgroundSlider
+                    label="opacity"
+                    value={values.dotOpacity}
+                    min={1}
+                    max={18}
+                    step={1}
+                    suffix="%"
+                    onChange={(value) => update('dotOpacity', value)}
+                />
+
+                <BackgroundSlider
+                    label="dot size"
+                    value={values.dotSize}
+                    min={0.4}
+                    max={1.4}
+                    step={0.05}
+                    suffix="px"
+                    onChange={(value) => update('dotSize', value)}
+                />
+
+                <BackgroundSlider
+                    label="spacing"
+                    value={values.gridSpacing}
+                    min={8}
+                    max={24}
+                    step={1}
+                    suffix="px"
+                    onChange={(value) => update('gridSpacing', value)}
+                />
+            </div>
+        </section>
+    );
+}
+
+function BackgroundSlider({
+    label,
+    value,
+    min,
+    max,
+    step,
+    suffix,
+    onChange,
+}: {
+    label: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    suffix: string;
+    onChange: (value: number) => void;
+}) {
+    return (
+        <label className="space-y-1">
+            <span className="flex items-center justify-between gap-2 font-mono text-[0.68rem] text-muted-foreground">
+                {label}
+                <span>
+                    {value}
+                    {suffix}
+                </span>
+            </span>
+            <input
+                type="range"
+                value={value}
+                min={min}
+                max={max}
+                step={step}
+                onChange={(event) => onChange(Number(event.target.value))}
+                className="h-2 w-full accent-green-500"
+            />
+        </label>
     );
 }
 
@@ -339,25 +536,285 @@ function ConnectedAccounts({
     );
 }
 
-function MetricCard({
-    icon,
+function Last24HoursSummaryCards({ summary }: { summary: Last24HoursSummary }) {
+    return (
+        <section className="space-y-3">
+            <h2 className="font-mono text-sm font-semibold">Last 24h</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <MiniSummaryCard
+                    label="activities"
+                    value={summary.activities}
+                />
+                <MiniSummaryCard
+                    label="repos touched"
+                    value={summary.repos_touched}
+                />
+                <MiniSummaryCard
+                    label="PRs updated"
+                    value={summary.prs_updated}
+                />
+                <MiniSummaryCard
+                    label="PRs merged"
+                    value={summary.prs_merged}
+                />
+                <MiniSummaryCard
+                    label="production deploys"
+                    value={
+                        summary.production_deploys === null
+                            ? 'TBA'
+                            : summary.production_deploys
+                    }
+                    muted={summary.production_deploys === null}
+                />
+            </div>
+        </section>
+    );
+}
+
+function MiniSummaryCard({
     label,
     value,
+    muted = false,
 }: {
-    icon: ReactNode;
     label: string;
-    value: number;
+    value: number | string;
+    muted?: boolean;
 }) {
     return (
-        <div className="rounded-lg border p-4">
-            <div className="flex items-center gap-2 font-mono text-sm text-muted-foreground">
-                {icon}
-                {label}
-            </div>
-            <p className="mt-3 font-mono text-3xl font-semibold tabular-nums">
+        <div className="rounded-md border bg-background/35 px-3 py-2">
+            <p
+                className={`font-mono text-lg leading-none font-semibold ${muted ? 'text-muted-foreground' : ''}`}
+            >
                 {value}
             </p>
+            <p className="mt-1 font-mono text-[0.68rem] text-muted-foreground">
+                {label}
+            </p>
         </div>
+    );
+}
+
+function TodayRepositoryPartition({
+    repositories,
+}: {
+    repositories: RepositoryActivityPartition[];
+}) {
+    const total = repositories.reduce(
+        (sum, repository) => sum + repository.total,
+        0,
+    );
+    const colors = [
+        'bg-green-300',
+        'bg-green-400',
+        'bg-green-500',
+        'bg-emerald-500',
+        'bg-lime-400',
+        'bg-teal-400',
+    ];
+
+    return (
+        <section className="space-y-3">
+            <div className="flex items-end justify-between gap-4">
+                <div>
+                    <h2 className="font-mono text-sm font-semibold">
+                        Today By Repository
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                        Total activity per repository today
+                    </p>
+                </div>
+                <p className="font-mono text-xs text-muted-foreground">
+                    {total} total
+                </p>
+            </div>
+
+            {repositories.length === 0 ? (
+                <div className="rounded-md border bg-background/35 px-3 py-3 text-xs text-muted-foreground">
+                    No repository activity recorded today.
+                </div>
+            ) : (
+                <div className="rounded-md border bg-background/35 p-3">
+                    <PartitionBar size="sm" gap={1}>
+                        {repositories.map((repository, index) => (
+                            <PartitionBarSegment
+                                key={repository.repository}
+                                num={repository.total}
+                                alignment={index === 0 ? 'left' : 'center'}
+                                barClassName={colors[index % colors.length]}
+                            >
+                                <PartitionBarSegmentTitle className="max-w-28 truncate font-mono text-[0.68rem] text-foreground">
+                                    {shortRepositoryName(repository.repository)}
+                                </PartitionBarSegmentTitle>
+                                <PartitionBarSegmentValue className="font-mono">
+                                    {repository.total}
+                                </PartitionBarSegmentValue>
+                            </PartitionBarSegment>
+                        ))}
+                    </PartitionBar>
+                </div>
+            )}
+        </section>
+    );
+}
+
+function ActivityHeatmapPanel({ heatmap }: { heatmap: ActivityHeatmap }) {
+    return (
+        <section className="space-y-3">
+            <div className="flex items-end justify-between gap-4">
+                <div>
+                    <h2 className="font-mono text-sm font-semibold">
+                        Activity Heatmap
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                        Daily activity over the last 12 weeks
+                    </p>
+                </div>
+                <p className="font-mono text-xs text-muted-foreground">
+                    {heatmap.total} total
+                </p>
+            </div>
+
+            <div className="overflow-x-auto rounded-md border bg-background/35 p-3">
+                <Heatmap
+                    data={heatmap.data}
+                    startDate={new Date(`${heatmap.start_date}T00:00:00`)}
+                    endDate={new Date(`${heatmap.end_date}T00:00:00`)}
+                    colorMode="discrete"
+                    colorScale={[
+                        'oklch(26.9% 0 0 / 0.72)',
+                        'oklch(44.8% 0.119 151.328)',
+                        'oklch(62.7% 0.194 149.214)',
+                        'oklch(72.3% 0.219 149.579)',
+                        'oklch(87.1% 0.15 154.449)',
+                    ]}
+                    cellSize={13}
+                    gap={3}
+                    daysOfTheWeek="single letter"
+                    className="w-max font-mono"
+                    valueDisplayFunction={(value) =>
+                        `${value} activit${value === 1 ? 'y' : 'ies'}`
+                    }
+                    dateDisplayFunction={(date) =>
+                        new Intl.DateTimeFormat(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                        }).format(date)
+                    }
+                />
+            </div>
+        </section>
+    );
+}
+
+function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
+    return (
+        <section className="space-y-3">
+            <div className="flex items-end justify-between gap-4">
+                <div>
+                    <h2 className="font-mono text-sm font-semibold">
+                        Last 7 Days
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                        Total activity per day
+                    </p>
+                </div>
+                <p className="font-mono text-xs text-muted-foreground">
+                    {data.reduce((sum, point) => sum + point.total, 0)} total
+                </p>
+            </div>
+
+            <div className="rounded-md border bg-background/35 p-3">
+                <ChartContainer>
+                    <AreaChart
+                        accessibilityLayer
+                        data={data}
+                        margin={{ left: 0, right: 8, top: 14, bottom: 0 }}
+                    >
+                        <defs>
+                            <linearGradient
+                                id="activity-total"
+                                x1="0"
+                                x2="0"
+                                y1="0"
+                                y2="1"
+                            >
+                                <stop
+                                    offset="5%"
+                                    stopColor="oklch(72.3% 0.219 149.579)"
+                                    stopOpacity={0.46}
+                                />
+                                <stop
+                                    offset="95%"
+                                    stopColor="oklch(72.3% 0.219 149.579)"
+                                    stopOpacity={0.04}
+                                />
+                            </linearGradient>
+                        </defs>
+                        <CartesianGrid
+                            vertical={false}
+                            stroke="currentColor"
+                            strokeDasharray="4 8"
+                            className="text-border"
+                        />
+                        <XAxis
+                            dataKey="label"
+                            axisLine={false}
+                            tickLine={false}
+                            tickMargin={10}
+                            tick={{ fontSize: 11 }}
+                        />
+                        <YAxis
+                            axisLine={false}
+                            tickLine={false}
+                            tickMargin={8}
+                            allowDecimals={false}
+                            width={28}
+                            tick={{ fontSize: 11 }}
+                        />
+                        <Tooltip
+                            cursor={{
+                                stroke: 'oklch(72.3% 0.219 149.579)',
+                                strokeOpacity: 0.32,
+                            }}
+                            content={({ active, payload, label }) => {
+                                if (!active || !payload?.length) {
+                                    return null;
+                                }
+
+                                return (
+                                    <div className="rounded-md border bg-background px-3 py-2 shadow-sm">
+                                        <p className="font-mono text-xs font-medium">
+                                            {label}
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {payload[0].value} activities
+                                        </p>
+                                    </div>
+                                );
+                            }}
+                        />
+                        <Area
+                            type="monotone"
+                            dataKey="total"
+                            stroke="oklch(72.3% 0.219 149.579)"
+                            strokeWidth={2}
+                            fill="url(#activity-total)"
+                            dot={{
+                                r: 3,
+                                fill: 'oklch(72.3% 0.219 149.579)',
+                                strokeWidth: 0,
+                            }}
+                            activeDot={{
+                                r: 4,
+                                fill: 'oklch(72.3% 0.219 149.579)',
+                                strokeWidth: 0,
+                            }}
+                        />
+                    </AreaChart>
+                </ChartContainer>
+            </div>
+        </section>
     );
 }
 
@@ -372,32 +829,13 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
     );
 }
 
-function RepositoryRow({ repository }: { repository: Repository }) {
-    return (
-        <a
-            href={repository.html_url}
-            className="block px-4 py-3 hover:bg-muted/40"
-            target="_blank"
-            rel="noreferrer"
-        >
-            <div className="flex items-center justify-between gap-3">
-                <p className="truncate font-mono text-sm font-medium">
-                    {repository.full_name}
-                </p>
-                <Badge variant="outline" className="text-xs">
-                    {repository.private ? 'Private' : 'Public'}
-                </Badge>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-                {repository.commits_count} commits ·{' '}
-                {repository.pull_requests_count} PRs ·{' '}
-                {repository.default_branch ?? 'branch unknown'}
-            </p>
-        </a>
-    );
-}
-
-function CommitTimeline({ commits }: { commits: Commit[] }) {
+function ActivityTimeline({
+    items,
+    newItemIds,
+}: {
+    items: ActivityItem[];
+    newItemIds: Set<string>;
+}) {
     return (
         <div
             className="relative [--timeline-color:theme(colors.green.500)]"
@@ -407,15 +845,19 @@ function CommitTimeline({ commits }: { commits: Commit[] }) {
                 } as React.CSSProperties
             }
         >
-            <ScrollArea className="max-h-[34rem] px-3 [mask-image:linear-gradient(to_bottom,black_calc(100%-4rem),transparent)]">
+            <ScrollFade
+                axis="vertical"
+                intensity={0.85}
+                className="max-h-[34rem] px-3"
+            >
                 <InfiniteScroll
-                    data="recentCommits"
+                    data="activityItems"
                     onlyNext
                     buffer={240}
-                    itemsElement="#commit-timeline-items"
+                    itemsElement="#activity-timeline-items"
                     loading={
                         <p className="py-2 pl-9 text-xs text-muted-foreground">
-                            Loading more commits...
+                            Loading more activity...
                         </p>
                     }
                     next={({ hasMore, fetch, loading, manualMode }) =>
@@ -428,38 +870,41 @@ function CommitTimeline({ commits }: { commits: Commit[] }) {
                                     disabled={loading}
                                     onClick={() => fetch()}
                                 >
-                                    Load more commits
+                                    Load more activity
                                 </Button>
                             </div>
                         ) : null
                     }
                 >
-                    <ol id="commit-timeline-items" className="relative py-1">
-                        {commits.map((commit, index) => (
-                            <CommitTimelineItem
-                                key={commit.id}
-                                commit={commit}
-                                isLast={index === commits.length - 1}
+                    <ol id="activity-timeline-items" className="relative py-1">
+                        {items.map((item, index) => (
+                            <ActivityTimelineItem
+                                key={item.id}
+                                item={item}
+                                isLast={index === items.length - 1}
+                                isNew={newItemIds.has(item.id)}
                             />
                         ))}
                     </ol>
                 </InfiniteScroll>
-            </ScrollArea>
+            </ScrollFade>
         </div>
     );
 }
 
-function CommitTimelineItem({
-    commit,
+function ActivityTimelineItem({
+    item,
     isLast,
+    isNew,
 }: {
-    commit: Commit;
+    item: ActivityItem;
     isLast: boolean;
+    isNew: boolean;
 }) {
     return (
         <a
-            href={commit.html_url ?? undefined}
-            className="group grid grid-cols-[1.25rem_minmax(0,1fr)] gap-3"
+            href={item.url ?? undefined}
+            className={`group grid grid-cols-[1.25rem_minmax(0,1fr)] gap-3 ${isNew ? 'animate-activity-enter' : ''}`}
             target="_blank"
             rel="noreferrer"
         >
@@ -468,23 +913,26 @@ function CommitTimelineItem({
                     <span className="absolute top-[1.125rem] bottom-[-0.75rem] w-px bg-[var(--timeline-color)] opacity-75 shadow-[0_0_3px_var(--timeline-color)]" />
                 )}
                 <span className="relative mt-1 flex h-4 w-4 items-center justify-center rounded-full border border-[var(--timeline-color)] bg-background text-[var(--timeline-color)] shadow-[0_0_5px_var(--timeline-color)] transition-transform group-hover:scale-105">
-                    <GitCommitHorizontal className="h-2.5 w-2.5" />
+                    {activityIcon(item.type)}
                 </span>
             </div>
             <div className="pb-3">
                 <p className="mb-0.5 font-mono text-[0.68rem] leading-none text-muted-foreground">
-                    {formatRelativeTime(commit.authored_at)}
+                    {formatRelativeTime(item.occurred_at)}
                 </p>
                 <p
                     className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:line-clamp-none group-hover:underline"
-                    title={commit.message ?? 'Commit'}
+                    title={item.title}
                 >
-                    {commit.message ?? 'Commit'}
+                    {item.title}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                    {commit.repository.full_name} ·{' '}
-                    {commit.author_login ?? commit.author_name ?? 'Unknown'} ·{' '}
-                    {shortSha(commit.sha)} · {formatDate(commit.authored_at)}
+                    {activityLabel(item.type)}
+                    {item.repository ? ` · ${item.repository}` : ''} ·{' '}
+                    {item.actor ?? 'Unknown'}
+                    {item.reference ? ` · ${item.reference}` : ''}
+                    {item.state ? ` · ${item.state.toLowerCase()}` : ''} ·{' '}
+                    {formatDate(item.occurred_at)}
                 </p>
             </div>
         </a>
@@ -563,8 +1011,34 @@ function StatusMessage({
     );
 }
 
-function shortSha(sha: string) {
-    return sha.slice(0, 7);
+function activityIcon(type: ActivityItem['type']) {
+    const className = 'h-2.5 w-2.5';
+
+    if (type === 'pull_request') {
+        return <GitPullRequest className={className} />;
+    }
+
+    if (type === 'review') {
+        return <MessageSquareText className={className} />;
+    }
+
+    return <GitCommitHorizontal className={className} />;
+}
+
+function activityLabel(type: ActivityItem['type']) {
+    if (type === 'pull_request') {
+        return 'Pull request';
+    }
+
+    if (type === 'review') {
+        return 'Review';
+    }
+
+    return 'Commit';
+}
+
+function shortRepositoryName(repository: string) {
+    return repository.split('/').at(-1) ?? repository;
 }
 
 function formatDate(value: string | null) {
@@ -588,7 +1062,6 @@ function formatRelativeTime(value: string | null) {
     const diffInSeconds = Math.round(
         (new Date(value).getTime() - Date.now()) / 1000,
     );
-    const absoluteSeconds = Math.abs(diffInSeconds);
     const divisions = [
         { amount: 60, unit: 'second' },
         { amount: 60, unit: 'minute' },

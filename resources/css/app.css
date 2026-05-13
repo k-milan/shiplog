@@ -141,3 +141,29 @@
         @apply bg-background text-foreground;
     }
 }
+
+@keyframes activity-enter {
+    0% {
+        opacity: 0;
+        transform: translateY(-0.5rem);
+        filter: drop-shadow(0 0 0.5rem oklch(72.3% 0.219 149.579 / 0.65));
+    }
+
+    60% {
+        opacity: 1;
+        transform: translateY(0);
+        filter: drop-shadow(0 0 0.35rem oklch(72.3% 0.219 149.579 / 0.45));
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+        filter: drop-shadow(0 0 0 oklch(72.3% 0.219 149.579 / 0));
+    }
+}
+
+@layer utilities {
+    .animate-activity-enter {
+        animation: activity-enter 900ms ease-out both;
+    }
+}

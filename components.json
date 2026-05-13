@@ -17,5 +17,8 @@
         "lib": "@/lib",
         "hooks": "@/hooks"
     },
-    "iconLibrary": "lucide"
+    "iconLibrary": "lucide",
+    "registries": {
+        "@8starlabs-ui": "https://ui.8starlabs.com/r/{name}.json"
+    }
 }

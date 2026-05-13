@@ -20,7 +20,7 @@ import {
     Plus,
     Trash2,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Area,
     AreaChart,
@@ -96,18 +96,33 @@ interface Props {
 }
 
 export default function GitHubIndex({
-    installations,
-    last24HoursSummary,
-    last7DaysActivity,
-    activityHeatmap,
-    todayActivityByRepository,
-    activityItems,
+    installations = [],
+    last24HoursSummary = {
+        activities: 0,
+        repos_touched: 0,
+        prs_updated: 0,
+        prs_merged: 0,
+        production_deploys: null,
+    },
+    last7DaysActivity = [],
+    activityHeatmap = {
+        start_date: new Date().toISOString().slice(0, 10),
+        end_date: new Date().toISOString().slice(0, 10),
+        total: 0,
+        data: [],
+    },
+    todayActivityByRepository = [],
+    activityItems = { data: [] },
     status,
 }: Props) {
     const previousActivityIds = useRef<string[] | null>(null);
     const animationTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [newActivityItemIds, setNewActivityItemIds] = useState<Set<string>>(
         () => new Set(),
+    );
+    const activityItemsData = useMemo(
+        () => activityItems.data ?? [],
+        [activityItems.data],
     );
 
     usePoll(10000, {
@@ -123,7 +138,7 @@ export default function GitHubIndex({
     });
 
     useEffect(() => {
-        const currentIds = activityItems.data.map((item) => item.id);
+        const currentIds = activityItemsData.map((item) => item.id);
         const previousIds = previousActivityIds.current;
 
         if (previousIds === null) {
@@ -155,7 +170,7 @@ export default function GitHubIndex({
         }
 
         previousActivityIds.current = currentIds;
-    }, [activityItems.data]);
+    }, [activityItemsData]);
 
     return (
         <main className="min-h-screen bg-background [background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,#ffffff_8%,transparent)_0.75px,transparent_0)] [background-size:13px_13px] text-foreground">
@@ -232,7 +247,7 @@ export default function GitHubIndex({
                                     Last 24 Hours
                                 </h2>
                                 <ActivityTimeline
-                                    items={activityItems.data}
+                                    items={activityItemsData}
                                     newItemIds={newActivityItemIds}
                                 />
                             </section>

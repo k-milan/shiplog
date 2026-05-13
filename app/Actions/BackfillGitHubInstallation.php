@@ -39,6 +39,27 @@ final readonly class BackfillGitHubInstallation
         }
     }
 
+    /**
+     * @param  array<int, array<string, mixed>>  $repositories
+     */
+    public function handleRepositories(GitHubAppInstallation $installation, array $repositories, ?CarbonImmutable $since = null): void
+    {
+        $since ??= CarbonImmutable::now()->subMonth();
+
+        if ($repositories === []) {
+            return;
+        }
+
+        $client = $this->client($this->tokenService->tokenFor($installation));
+
+        foreach ($repositories as $repositoryPayload) {
+            $repository = $this->ingestion->upsertRepository($installation, $repositoryPayload);
+
+            $this->backfillCommits($client, $repository, $since);
+            $this->backfillPullRequests($client, $repository, $since);
+        }
+    }
+
     private function backfillCommits(PendingRequest $client, GitHubRepository $repository, CarbonImmutable $since): void
     {
         $url = "https://api.github.com/repos/{$repository->full_name}/commits";

@@ -41,16 +41,6 @@ final readonly class GitHubAppController
             'activityHeatmap' => $this->activityHeatmap(),
             'todayActivityByRepository' => $this->todayActivityByRepository(),
             'activityItems' => Inertia::scroll($this->activityItems()),
-            'recentPullRequests' => GitHubPullRequest::query()
-                ->with('repository:id,full_name')
-                ->orderByDesc('updated_at_github')
-                ->limit(8)
-                ->get(['id', 'github_repository_id', 'number', 'title', 'state', 'draft', 'author_login', 'html_url', 'opened_at', 'updated_at_github', 'merged_at']),
-            'recentReviews' => GitHubPullRequestReview::query()
-                ->with('pullRequest:id,github_repository_id,number,title')
-                ->orderByDesc('submitted_at')
-                ->limit(8)
-                ->get(['id', 'github_pull_request_id', 'state', 'author_login', 'body', 'html_url', 'submitted_at']),
         ]);
     }
 

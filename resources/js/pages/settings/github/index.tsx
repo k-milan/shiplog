@@ -69,13 +69,6 @@ interface RepositoryActivityPartition {
     total: number;
 }
 
-interface BackgroundControls {
-    dotColor: string;
-    dotOpacity: number;
-    dotSize: number;
-    gridSpacing: number;
-}
-
 interface ActivityItem {
     id: string;
     type: 'commit' | 'pull_request' | 'review';
@@ -92,35 +85,6 @@ interface Paginated<T> {
     data: T[];
 }
 
-interface PullRequest {
-    id: number;
-    number: number;
-    title: string;
-    state: string;
-    draft: boolean;
-    author_login: string | null;
-    html_url: string;
-    opened_at: string | null;
-    updated_at_github: string | null;
-    merged_at: string | null;
-    repository: {
-        full_name: string;
-    };
-}
-
-interface Review {
-    id: number;
-    state: string;
-    author_login: string | null;
-    body: string | null;
-    html_url: string | null;
-    submitted_at: string | null;
-    pull_request: {
-        number: number;
-        title: string;
-    };
-}
-
 interface Props {
     installations: GitHubInstallation[];
     last24HoursSummary: Last24HoursSummary;
@@ -128,8 +92,6 @@ interface Props {
     activityHeatmap: ActivityHeatmap;
     todayActivityByRepository: RepositoryActivityPartition[];
     activityItems: Paginated<ActivityItem>;
-    recentPullRequests: PullRequest[];
-    recentReviews: Review[];
     status?: string;
 }
 
@@ -140,8 +102,6 @@ export default function GitHubIndex({
     activityHeatmap,
     todayActivityByRepository,
     activityItems,
-    recentPullRequests,
-    recentReviews,
     status,
 }: Props) {
     const previousActivityIds = useRef<string[] | null>(null);
@@ -149,12 +109,6 @@ export default function GitHubIndex({
     const [newActivityItemIds, setNewActivityItemIds] = useState<Set<string>>(
         () => new Set(),
     );
-    const [backgroundControls, setBackgroundControls] = useState({
-        dotColor: '#ffffff',
-        dotOpacity: 7,
-        dotSize: 0.75,
-        gridSpacing: 13,
-    });
 
     usePoll(10000, {
         only: [
@@ -203,16 +157,8 @@ export default function GitHubIndex({
         previousActivityIds.current = currentIds;
     }, [activityItems.data]);
 
-    const backgroundStyle = {
-        backgroundImage: `radial-gradient(circle at 1px 1px, color-mix(in oklch, ${backgroundControls.dotColor} ${backgroundControls.dotOpacity}%, transparent) ${backgroundControls.dotSize}px, transparent 0)`,
-        backgroundSize: `${backgroundControls.gridSpacing}px ${backgroundControls.gridSpacing}px`,
-    };
-
     return (
-        <main
-            className="min-h-screen bg-background text-foreground"
-            style={backgroundStyle}
-        >
+        <main className="min-h-screen bg-background [background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,#ffffff_8%,transparent)_0.75px,transparent_0)] [background-size:13px_13px] text-foreground">
             <Head title="Shiplog" />
 
             <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-10 sm:px-6">
@@ -236,11 +182,6 @@ export default function GitHubIndex({
                         </a>
                     </Button>
                 </header>
-
-                <BackgroundTuner
-                    values={backgroundControls}
-                    onChange={setBackgroundControls}
-                />
 
                 <div className="space-y-6">
                     {status === 'github-app-connected' && (
@@ -295,32 +236,6 @@ export default function GitHubIndex({
                                     newItemIds={newActivityItemIds}
                                 />
                             </section>
-
-                            <section className="grid gap-6 lg:grid-cols-2">
-                                <Panel title="Recent Pull Requests">
-                                    <div className="divide-y divide-border">
-                                        {recentPullRequests.map(
-                                            (pullRequest) => (
-                                                <PullRequestRow
-                                                    key={pullRequest.id}
-                                                    pullRequest={pullRequest}
-                                                />
-                                            ),
-                                        )}
-                                    </div>
-                                </Panel>
-
-                                <Panel title="Recent Reviews">
-                                    <div className="divide-y divide-border">
-                                        {recentReviews.map((review) => (
-                                            <ReviewRow
-                                                key={review.id}
-                                                review={review}
-                                            />
-                                        ))}
-                                    </div>
-                                </Panel>
-                            </section>
                         </>
                     )}
                 </div>
@@ -346,129 +261,6 @@ function EmptyState() {
                 </a>
             </Button>
         </section>
-    );
-}
-
-function BackgroundTuner({
-    values,
-    onChange,
-}: {
-    values: BackgroundControls;
-    onChange: (values: BackgroundControls) => void;
-}) {
-    const update = <Key extends keyof BackgroundControls>(
-        key: Key,
-        value: BackgroundControls[Key],
-    ) => {
-        onChange({ ...values, [key]: value });
-    };
-
-    return (
-        <section className="mb-6 rounded-md border bg-background/60 p-3">
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                    <h2 className="font-mono text-sm font-semibold">
-                        Background Tuner
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                        Adjust the page grid and use the values below.
-                    </p>
-                </div>
-                <code className="rounded bg-muted px-2 py-1 font-mono text-[0.68rem] text-muted-foreground">
-                    {`color ${values.dotColor} / opacity ${values.dotOpacity}% / dot ${values.dotSize}px / spacing ${values.gridSpacing}px`}
-                </code>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <label className="space-y-1">
-                    <span className="font-mono text-[0.68rem] text-muted-foreground">
-                        dot color
-                    </span>
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="color"
-                            value={values.dotColor}
-                            onChange={(event) =>
-                                update('dotColor', event.target.value)
-                            }
-                            className="h-8 w-10 rounded border border-border bg-transparent"
-                        />
-                        <span className="font-mono text-xs">
-                            {values.dotColor}
-                        </span>
-                    </div>
-                </label>
-
-                <BackgroundSlider
-                    label="opacity"
-                    value={values.dotOpacity}
-                    min={1}
-                    max={18}
-                    step={1}
-                    suffix="%"
-                    onChange={(value) => update('dotOpacity', value)}
-                />
-
-                <BackgroundSlider
-                    label="dot size"
-                    value={values.dotSize}
-                    min={0.4}
-                    max={1.4}
-                    step={0.05}
-                    suffix="px"
-                    onChange={(value) => update('dotSize', value)}
-                />
-
-                <BackgroundSlider
-                    label="spacing"
-                    value={values.gridSpacing}
-                    min={8}
-                    max={24}
-                    step={1}
-                    suffix="px"
-                    onChange={(value) => update('gridSpacing', value)}
-                />
-            </div>
-        </section>
-    );
-}
-
-function BackgroundSlider({
-    label,
-    value,
-    min,
-    max,
-    step,
-    suffix,
-    onChange,
-}: {
-    label: string;
-    value: number;
-    min: number;
-    max: number;
-    step: number;
-    suffix: string;
-    onChange: (value: number) => void;
-}) {
-    return (
-        <label className="space-y-1">
-            <span className="flex items-center justify-between gap-2 font-mono text-[0.68rem] text-muted-foreground">
-                {label}
-                <span>
-                    {value}
-                    {suffix}
-                </span>
-            </span>
-            <input
-                type="range"
-                value={value}
-                min={min}
-                max={max}
-                step={step}
-                onChange={(event) => onChange(Number(event.target.value))}
-                className="h-2 w-full accent-green-500"
-            />
-        </label>
     );
 }
 
@@ -935,55 +727,6 @@ function ActivityTimelineItem({
                     {formatDate(item.occurred_at)}
                 </p>
             </div>
-        </a>
-    );
-}
-
-function PullRequestRow({ pullRequest }: { pullRequest: PullRequest }) {
-    return (
-        <a
-            href={pullRequest.html_url}
-            className="block px-4 py-3 hover:bg-muted/40"
-            target="_blank"
-            rel="noreferrer"
-        >
-            <div className="flex items-start justify-between gap-3">
-                <p className="line-clamp-2 font-mono text-sm font-medium">
-                    #{pullRequest.number} {pullRequest.title}
-                </p>
-                <Badge variant="secondary" className="shrink-0 text-xs">
-                    {pullRequest.merged_at ? 'merged' : pullRequest.state}
-                </Badge>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-                {pullRequest.repository.full_name} ·{' '}
-                {pullRequest.author_login ?? 'Unknown'} ·{' '}
-                {formatDate(pullRequest.updated_at_github)}
-            </p>
-        </a>
-    );
-}
-
-function ReviewRow({ review }: { review: Review }) {
-    return (
-        <a
-            href={review.html_url ?? undefined}
-            className="block px-4 py-3 hover:bg-muted/40"
-            target="_blank"
-            rel="noreferrer"
-        >
-            <div className="flex items-start justify-between gap-3">
-                <p className="line-clamp-2 font-mono text-sm font-medium">
-                    #{review.pull_request.number} {review.pull_request.title}
-                </p>
-                <Badge variant="secondary" className="shrink-0 text-xs">
-                    {review.state.toLowerCase()}
-                </Badge>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-                {review.author_login ?? 'Unknown'} ·{' '}
-                {formatDate(review.submitted_at)}
-            </p>
         </a>
     );
 }

@@ -253,6 +253,71 @@ it('ingests push webhooks', function (): void {
     ]);
 });
 
+it('backfills repositories added to a github app installation', function (): void {
+    config(['github.webhook_secret' => 'webhook-secret']);
+
+    GitHubAppInstallation::factory()->create([
+        'installation_id' => 12345678,
+    ]);
+
+    Http::fake([
+        'api.github.com/app/installations/12345678/access_tokens' => Http::response([
+            'token' => 'installation-token',
+            'expires_at' => '2026-05-12T12:00:00Z',
+        ], 201),
+        'api.github.com/repos/myorg/new-repo/commits*' => Http::response([
+            [
+                'sha' => 'newreposha',
+                'html_url' => 'https://github.com/myorg/new-repo/commit/newreposha',
+                'author' => ['login' => 'octocat'],
+                'commit' => [
+                    'message' => 'Initial new repo sync',
+                    'author' => [
+                        'name' => 'Octo Cat',
+                        'email' => 'octocat@example.com',
+                        'date' => '2026-05-06T00:00:00Z',
+                    ],
+                ],
+            ],
+        ], 200),
+        'api.github.com/repos/myorg/new-repo/pulls*' => Http::response([], 200),
+    ]);
+
+    $payload = [
+        'installation' => ['id' => 12345678],
+        'repositories_added' => [
+            [
+                'id' => 654321,
+                'name' => 'new-repo',
+                'full_name' => 'myorg/new-repo',
+                'owner' => ['login' => 'myorg'],
+                'private' => false,
+                'default_branch' => 'main',
+                'html_url' => 'https://github.com/myorg/new-repo',
+                'pushed_at' => '2026-05-06T00:00:00Z',
+            ],
+        ],
+        'repositories_removed' => [],
+    ];
+    $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+    $response = $this
+        ->withHeaders(githubWebhookHeaders('installation_repositories', $body))
+        ->postJson(route('github-apps.webhook'), $payload);
+
+    $response->assertOk()
+        ->assertJson(['ok' => true]);
+
+    $this->assertDatabaseHas('github_repositories', [
+        'github_id' => 654321,
+        'full_name' => 'myorg/new-repo',
+    ]);
+    $this->assertDatabaseHas('github_commits', [
+        'sha' => 'newreposha',
+        'message' => 'Initial new repo sync',
+    ]);
+});
+
 it('rejects webhooks with invalid signatures', function (): void {
     config(['github.webhook_secret' => 'webhook-secret']);
 

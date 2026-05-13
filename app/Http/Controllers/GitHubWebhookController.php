@@ -4,28 +4,53 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Actions\BackfillGitHubInstallation;
 use App\Models\GitHubAppInstallation;
 use App\Models\GitHubPullRequest;
 use App\Services\GitHubDataIngestionService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 final readonly class GitHubWebhookController
 {
-    public function __construct(private GitHubDataIngestionService $ingestion) {}
+    public function __construct(
+        private GitHubDataIngestionService $ingestion,
+        private BackfillGitHubInstallation $backfillGitHubInstallation,
+    ) {}
 
     public function __invoke(Request $request): JsonResponse
     {
         if (! $this->hasValidSignature($request)) {
+            Log::warning('Rejected GitHub webhook with invalid signature.', [
+                'event' => $request->header('X-GitHub-Event'),
+                'delivery' => $request->header('X-GitHub-Delivery'),
+            ]);
+
             return response()->json(['message' => 'Invalid signature.'], 401);
         }
 
         $event = (string) $request->header('X-GitHub-Event');
         /** @var array<string, mixed> $payload */
         $payload = $request->json()->all();
+        $installationId = is_array($payload['installation'] ?? null)
+            ? $payload['installation']['id'] ?? null
+            : null;
+
+        Log::info('Received GitHub webhook.', [
+            'event' => $event,
+            'delivery' => $request->header('X-GitHub-Delivery'),
+            'installation_id' => $installationId,
+            'repository' => is_array($payload['repository'] ?? null)
+                ? $payload['repository']['full_name'] ?? null
+                : null,
+        ]);
 
         match ($event) {
             'ping' => null,
+            'installation_repositories' => $this->handleInstallationRepositories($payload),
             'push' => $this->handlePush($payload),
             'pull_request' => $this->handlePullRequest($payload),
             'pull_request_review' => $this->handlePullRequestReview($payload),
@@ -38,11 +63,59 @@ final readonly class GitHubWebhookController
     /**
      * @param  array<string, mixed>  $payload
      */
+    private function handleInstallationRepositories(array $payload): void
+    {
+        $installation = $this->installationFromPayload($payload);
+        /** @var array<int, array<string, mixed>> $repositories */
+        $repositories = is_array($payload['repositories_added'] ?? null)
+            ? array_values(array_filter($payload['repositories_added'], is_array(...)))
+            : [];
+
+        if ($installation === null || $repositories === []) {
+            Log::info('Skipped GitHub installation_repositories webhook.', [
+                'reason' => $installation === null ? 'unknown_installation' : 'no_repositories_added',
+                'installation_id' => is_array($payload['installation'] ?? null) ? $payload['installation']['id'] ?? null : null,
+                'repositories_added_count' => count($repositories),
+            ]);
+
+            return;
+        }
+
+        try {
+            $this->backfillGitHubInstallation->handleRepositories(
+                $installation,
+                $repositories,
+                CarbonImmutable::now()->subMonth(),
+            );
+
+            Log::info('Backfilled GitHub repositories added to installation.', [
+                'installation_id' => $installation->installation_id,
+                'repositories_added_count' => count($repositories),
+            ]);
+        } catch (Throwable $exception) {
+            Log::error('Failed to backfill GitHub repositories added to installation.', [
+                'installation_id' => $installation->installation_id,
+                'repositories_added_count' => count($repositories),
+                'exception' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     private function handlePush(array $payload): void
     {
         $installation = $this->installationFromPayload($payload);
 
         if ($installation === null || ! is_array($payload['repository'] ?? null)) {
+            Log::info('Skipped GitHub push webhook.', [
+                'reason' => $installation === null ? 'unknown_installation' : 'missing_repository',
+                'installation_id' => is_array($payload['installation'] ?? null) ? $payload['installation']['id'] ?? null : null,
+            ]);
+
             return;
         }
 
@@ -74,6 +147,11 @@ final readonly class GitHubWebhookController
             || ! is_array($payload['repository'] ?? null)
             || ! is_array($payload['pull_request'] ?? null)
         ) {
+            Log::info('Skipped GitHub pull_request webhook.', [
+                'reason' => $installation === null ? 'unknown_installation' : 'missing_payload_data',
+                'installation_id' => is_array($payload['installation'] ?? null) ? $payload['installation']['id'] ?? null : null,
+            ]);
+
             return;
         }
 
@@ -99,6 +177,11 @@ final readonly class GitHubWebhookController
             || ! is_array($payload['pull_request'] ?? null)
             || ! is_array($payload['review'] ?? null)
         ) {
+            Log::info('Skipped GitHub pull_request_review webhook.', [
+                'reason' => $installation === null ? 'unknown_installation' : 'missing_payload_data',
+                'installation_id' => is_array($payload['installation'] ?? null) ? $payload['installation']['id'] ?? null : null,
+            ]);
+
             return;
         }
 

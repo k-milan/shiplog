@@ -4,19 +4,21 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Actions\BackfillGitHubInstallation;
 use App\Actions\ConnectGitHubApp;
 use App\Actions\DisconnectGitHubApp;
 use App\Contracts\GitHubAppTokenContract;
+use App\Jobs\BackfillGitHubInstallationJob;
 use App\Models\GitHubAppInstallation;
 use App\Models\GitHubCommit;
 use App\Models\GitHubPullRequest;
 use App\Models\GitHubPullRequestReview;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -25,7 +27,6 @@ final readonly class GitHubAppController
 {
     public function __construct(
         private ConnectGitHubApp $connectGitHubApp,
-        private BackfillGitHubInstallation $backfillGitHubInstallation,
         private DisconnectGitHubApp $disconnectGitHubApp,
         private GitHubAppTokenContract $tokenService,
     ) {}
@@ -35,7 +36,7 @@ final readonly class GitHubAppController
         return Inertia::render('settings/github/index', [
             'installations' => GitHubAppInstallation::query()
                 ->orderBy('account_login')
-                ->get(['id', 'installation_id', 'account_login', 'account_type', 'account_name', 'avatar_url', 'created_at']),
+                ->get(['id', 'installation_id', 'account_login', 'account_type', 'account_name', 'avatar_url', 'sync_status', 'sync_started_at', 'sync_finished_at', 'sync_error', 'created_at']),
             'last24HoursSummary' => $this->last24HoursSummary(),
             'last7DaysActivity' => $this->last7DaysActivity(),
             'activityHeatmap' => $this->activityHeatmap(),
@@ -69,7 +70,14 @@ final readonly class GitHubAppController
         }
 
         $installation = $this->connectGitHubApp->handle($installationData);
-        $this->backfillGitHubInstallation->handle($installation);
+        $installation->forceFill([
+            'sync_status' => 'pending',
+            'sync_started_at' => null,
+            'sync_finished_at' => null,
+            'sync_error' => null,
+        ])->save();
+
+        BackfillGitHubInstallationJob::dispatch($installation->id);
 
         return to_route('github-apps.index')
             ->with('status', 'github-app-connected');
@@ -88,13 +96,30 @@ final readonly class GitHubAppController
      */
     private function fetchInstallationData(int $installationId): ?array
     {
-        $response = Http::withHeaders([
-            'Authorization' => 'Bearer '.$this->tokenService->generateAppToken(),
-            'Accept' => 'application/vnd.github+json',
-            'X-GitHub-Api-Version' => '2022-11-28',
-        ])->get("https://api.github.com/app/installations/{$installationId}");
+        try {
+            $response = Http::connectTimeout(10)
+                ->timeout(30)
+                ->retry(2, 500, throw: false)
+                ->withHeaders([
+                    'Authorization' => 'Bearer '.$this->tokenService->generateAppToken(),
+                    'Accept' => 'application/vnd.github+json',
+                    'X-GitHub-Api-Version' => '2022-11-28',
+                ])->get("https://api.github.com/app/installations/{$installationId}");
+        } catch (ConnectionException $exception) {
+            Log::warning('Failed to fetch GitHub installation data.', [
+                'installation_id' => $installationId,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
 
         if (! $response->successful()) {
+            Log::warning('GitHub installation data request was not successful.', [
+                'installation_id' => $installationId,
+                'status' => $response->status(),
+            ]);
+
             return null;
         }
 

@@ -37,6 +37,10 @@ interface GitHubInstallation {
     account_type: string;
     account_name: string | null;
     avatar_url: string | null;
+    sync_status: 'pending' | 'syncing' | 'complete' | 'failed' | string;
+    sync_started_at: string | null;
+    sync_finished_at: string | null;
+    sync_error: string | null;
     created_at: string;
 }
 
@@ -124,9 +128,16 @@ export default function GitHubIndex({
         () => activityItems.data ?? [],
         [activityItems.data],
     );
+    const hasSyncInProgress = installations.some((installation) =>
+        ['pending', 'syncing'].includes(installation.sync_status),
+    );
+    const hasFailedSync = installations.some(
+        (installation) => installation.sync_status === 'failed',
+    );
 
     usePoll(10000, {
         only: [
+            'installations',
             'activityItems',
             'last24HoursSummary',
             'last7DaysActivity',
@@ -201,7 +212,8 @@ export default function GitHubIndex({
                 <div className="space-y-6">
                     {status === 'github-app-connected' && (
                         <StatusMessage variant="success">
-                            GitHub account connected successfully.
+                            GitHub account connected. We are syncing its
+                            activity in the background.
                         </StatusMessage>
                     )}
 
@@ -222,6 +234,20 @@ export default function GitHubIndex({
                     ) : (
                         <>
                             <ConnectedAccounts installations={installations} />
+
+                            {hasSyncInProgress && (
+                                <StatusMessage>
+                                    GitHub sync is running. Keep the queue worker
+                                    on while we pull the last month of activity.
+                                </StatusMessage>
+                            )}
+
+                            {hasFailedSync && (
+                                <StatusMessage variant="error">
+                                    One GitHub sync failed. The account row shows
+                                    the latest error from the queued job.
+                                </StatusMessage>
+                            )}
 
                             {last24HoursSummary.activities === 0 && (
                                 <StatusMessage>
@@ -324,6 +350,7 @@ function ConnectedAccounts({
                             <Badge variant="secondary" className="text-xs">
                                 {installation.account_type}
                             </Badge>
+                            <SyncStatusBadge installation={installation} />
                         </div>
 
                         <Form
@@ -348,6 +375,48 @@ function ConnectedAccounts({
                 ))}
             </ul>
         </Panel>
+    );
+}
+
+function SyncStatusBadge({
+    installation,
+}: {
+    installation: GitHubInstallation;
+}) {
+    const status = installation.sync_status;
+    const label =
+        status === 'complete'
+            ? 'synced'
+            : status === 'syncing'
+              ? 'syncing'
+              : status === 'failed'
+                ? 'failed'
+                : 'pending';
+    const title =
+        status === 'failed'
+            ? (installation.sync_error ?? 'GitHub sync failed')
+            : status === 'complete' && installation.sync_finished_at
+              ? `Synced ${formatRelativeTime(installation.sync_finished_at)}`
+              : undefined;
+    const className =
+        {
+            complete:
+                'border-green-500/40 bg-green-500/10 text-green-500 dark:text-green-400',
+            syncing:
+                'border-sky-500/40 bg-sky-500/10 text-sky-500 dark:text-sky-400',
+            pending:
+                'border-amber-500/40 bg-amber-500/10 text-amber-500 dark:text-amber-400',
+            failed: 'border-destructive/40 bg-destructive/10 text-destructive',
+        }[status] ?? 'border-border text-muted-foreground';
+
+    return (
+        <Badge
+            variant="outline"
+            className={`font-mono text-[0.65rem] ${className}`}
+            title={title}
+        >
+            {label}
+        </Badge>
     );
 }
 

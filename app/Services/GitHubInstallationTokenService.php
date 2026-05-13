@@ -20,11 +20,14 @@ final readonly class GitHubInstallationTokenService
             return $installation->access_token;
         }
 
-        $response = Http::withHeaders([
-            'Authorization' => 'Bearer '.$this->appTokenService->generateAppToken(),
-            'Accept' => 'application/vnd.github+json',
-            'X-GitHub-Api-Version' => '2022-11-28',
-        ])->post("https://api.github.com/app/installations/{$installation->installation_id}/access_tokens");
+        $response = Http::connectTimeout(10)
+            ->timeout(30)
+            ->retry(2, 500, throw: false)
+            ->withHeaders([
+                'Authorization' => 'Bearer '.$this->appTokenService->generateAppToken(),
+                'Accept' => 'application/vnd.github+json',
+                'X-GitHub-Api-Version' => '2022-11-28',
+            ])->post("https://api.github.com/app/installations/{$installation->installation_id}/access_tokens");
 
         if (! $response->successful()) {
             throw new RuntimeException('Failed to create GitHub installation token.');

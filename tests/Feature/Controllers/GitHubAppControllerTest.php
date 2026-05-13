@@ -3,7 +3,10 @@
 declare(strict_types=1);
 
 use App\Contracts\GitHubAppTokenContract;
+use App\Jobs\BackfillGitHubInstallationJob;
+use App\Jobs\BackfillGitHubRepositoriesJob;
 use App\Models\GitHubAppInstallation;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function (): void {
@@ -66,11 +69,9 @@ it('redirects to github app installation url', function (): void {
 });
 
 it('handles github callback and connects installation', function (): void {
+    Bus::fake();
+
     Http::fake([
-        'api.github.com/app/installations/12345678/access_tokens' => Http::response([
-            'token' => 'installation-token',
-            'expires_at' => '2026-05-12T12:00:00Z',
-        ], 201),
         'api.github.com/app/installations/*' => Http::response([
             'id' => 12345678,
             'account' => [
@@ -78,60 +79,6 @@ it('handles github callback and connects installation', function (): void {
                 'type' => 'Organization',
                 'name' => 'My Org',
                 'avatar_url' => 'https://avatars.githubusercontent.com/u/123',
-            ],
-        ], 200),
-        'api.github.com/installation/repositories*' => Http::response([
-            'repositories' => [
-                [
-                    'id' => 987,
-                    'name' => 'demo',
-                    'full_name' => 'myorg/demo',
-                    'owner' => ['login' => 'myorg'],
-                    'private' => false,
-                    'default_branch' => 'main',
-                    'html_url' => 'https://github.com/myorg/demo',
-                    'pushed_at' => '2026-05-01T00:00:00Z',
-                ],
-            ],
-        ], 200),
-        'api.github.com/repos/myorg/demo/commits*' => Http::response([
-            [
-                'sha' => 'abc123',
-                'html_url' => 'https://github.com/myorg/demo/commit/abc123',
-                'author' => ['login' => 'octocat'],
-                'commit' => [
-                    'message' => 'Initial sync',
-                    'author' => [
-                        'name' => 'Octo Cat',
-                        'email' => 'octocat@example.com',
-                        'date' => '2026-05-02T00:00:00Z',
-                    ],
-                ],
-            ],
-        ], 200),
-        'api.github.com/repos/myorg/demo/pulls/12/reviews*' => Http::response([
-            [
-                'id' => 789,
-                'state' => 'APPROVED',
-                'user' => ['login' => 'reviewer'],
-                'body' => 'Looks good',
-                'html_url' => 'https://github.com/myorg/demo/pull/12#pullrequestreview-789',
-                'submitted_at' => '2026-05-05T00:00:00Z',
-            ],
-        ], 200),
-        'api.github.com/repos/myorg/demo/pulls*' => Http::response([
-            [
-                'id' => 456,
-                'number' => 12,
-                'title' => 'Add sync',
-                'state' => 'open',
-                'draft' => false,
-                'user' => ['login' => 'octocat'],
-                'html_url' => 'https://github.com/myorg/demo/pull/12',
-                'created_at' => '2026-05-03T00:00:00Z',
-                'updated_at' => '2026-05-04T00:00:00Z',
-                'closed_at' => null,
-                'merged_at' => null,
             ],
         ], 200),
     ]);
@@ -149,25 +96,10 @@ it('handles github callback and connects installation', function (): void {
         'installation_id' => 12345678,
         'account_login' => 'myorg',
         'account_type' => 'Organization',
+        'sync_status' => 'pending',
     ]);
 
-    $this->assertDatabaseHas('github_repositories', [
-        'github_id' => 987,
-        'full_name' => 'myorg/demo',
-    ]);
-    $this->assertDatabaseHas('github_commits', [
-        'sha' => 'abc123',
-        'message' => 'Initial sync',
-    ]);
-    $this->assertDatabaseHas('github_pull_requests', [
-        'github_id' => 456,
-        'number' => 12,
-        'title' => 'Add sync',
-    ]);
-    $this->assertDatabaseHas('github_pull_request_reviews', [
-        'github_id' => 789,
-        'state' => 'APPROVED',
-    ]);
+    Bus::assertDispatched(BackfillGitHubInstallationJob::class);
 });
 
 it('handles github callback with delete setup action', function (): void {
@@ -255,32 +187,10 @@ it('ingests push webhooks', function (): void {
 
 it('backfills repositories added to a github app installation', function (): void {
     config(['github.webhook_secret' => 'webhook-secret']);
+    Bus::fake();
 
-    GitHubAppInstallation::factory()->create([
+    $installation = GitHubAppInstallation::factory()->create([
         'installation_id' => 12345678,
-    ]);
-
-    Http::fake([
-        'api.github.com/app/installations/12345678/access_tokens' => Http::response([
-            'token' => 'installation-token',
-            'expires_at' => '2026-05-12T12:00:00Z',
-        ], 201),
-        'api.github.com/repos/myorg/new-repo/commits*' => Http::response([
-            [
-                'sha' => 'newreposha',
-                'html_url' => 'https://github.com/myorg/new-repo/commit/newreposha',
-                'author' => ['login' => 'octocat'],
-                'commit' => [
-                    'message' => 'Initial new repo sync',
-                    'author' => [
-                        'name' => 'Octo Cat',
-                        'email' => 'octocat@example.com',
-                        'date' => '2026-05-06T00:00:00Z',
-                    ],
-                ],
-            ],
-        ], 200),
-        'api.github.com/repos/myorg/new-repo/pulls*' => Http::response([], 200),
     ]);
 
     $payload = [
@@ -308,14 +218,11 @@ it('backfills repositories added to a github app installation', function (): voi
     $response->assertOk()
         ->assertJson(['ok' => true]);
 
-    $this->assertDatabaseHas('github_repositories', [
-        'github_id' => 654321,
-        'full_name' => 'myorg/new-repo',
-    ]);
-    $this->assertDatabaseHas('github_commits', [
-        'sha' => 'newreposha',
-        'message' => 'Initial new repo sync',
-    ]);
+    Bus::assertDispatched(
+        BackfillGitHubRepositoriesJob::class,
+        fn (BackfillGitHubRepositoriesJob $job): bool => $job->installationId === $installation->id
+            && $job->repositories[0]['full_name'] === 'myorg/new-repo',
+    );
 });
 
 it('rejects webhooks with invalid signatures', function (): void {

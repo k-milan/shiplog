@@ -129,7 +129,7 @@ final readonly class BackfillGitHubInstallation
         return Http::withToken($token)
             ->connectTimeout(10)
             ->timeout(30)
-            ->retry(2, 500)
+            ->retry(2, 500, throw: false)
             ->withHeaders([
                 'Accept' => 'application/vnd.github+json',
                 'X-GitHub-Api-Version' => '2022-11-28',

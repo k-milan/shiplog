@@ -4,21 +4,18 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Actions\BackfillGitHubInstallation;
+use App\Jobs\BackfillGitHubRepositoriesJob;
 use App\Models\GitHubAppInstallation;
 use App\Models\GitHubPullRequest;
 use App\Services\GitHubDataIngestionService;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Throwable;
 
 final readonly class GitHubWebhookController
 {
     public function __construct(
         private GitHubDataIngestionService $ingestion,
-        private BackfillGitHubInstallation $backfillGitHubInstallation,
     ) {}
 
     public function __invoke(Request $request): JsonResponse
@@ -81,24 +78,12 @@ final readonly class GitHubWebhookController
             return;
         }
 
-        try {
-            $this->backfillGitHubInstallation->handleRepositories(
-                $installation,
-                $repositories,
-                CarbonImmutable::now()->subMonth(),
-            );
+        BackfillGitHubRepositoriesJob::dispatch($installation->id, $repositories);
 
-            Log::info('Backfilled GitHub repositories added to installation.', [
-                'installation_id' => $installation->installation_id,
-                'repositories_added_count' => count($repositories),
-            ]);
-        } catch (Throwable $exception) {
-            Log::error('Failed to backfill GitHub repositories added to installation.', [
-                'installation_id' => $installation->installation_id,
-                'repositories_added_count' => count($repositories),
-                'exception' => $exception->getMessage(),
-            ]);
-        }
+        Log::info('Queued backfill for GitHub repositories added to installation.', [
+            'installation_id' => $installation->installation_id,
+            'repositories_added_count' => count($repositories),
+        ]);
     }
 
     /**

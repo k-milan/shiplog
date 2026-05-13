@@ -21,6 +21,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property-read string|null $avatar_url
  * @property-read string|null $access_token
  * @property-read CarbonInterface|null $token_expires_at
+ * @property-read string $sync_status
+ * @property-read CarbonInterface|null $sync_started_at
+ * @property-read CarbonInterface|null $sync_finished_at
+ * @property-read string|null $sync_error
  * @property-read CarbonInterface $created_at
  * @property-read CarbonInterface $updated_at
  */
@@ -56,6 +60,10 @@ final class GitHubAppInstallation extends Model
             'avatar_url' => 'string',
             'access_token' => 'encrypted',
             'token_expires_at' => 'datetime',
+            'sync_status' => 'string',
+            'sync_started_at' => 'datetime',
+            'sync_finished_at' => 'datetime',
+            'sync_error' => 'string',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

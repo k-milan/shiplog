@@ -371,26 +371,52 @@ final readonly class GitHubAppController
     }
 
     /**
-     * @return array{activities: int, repos_touched: int, prs_updated: int, prs_merged: int, production_deploys: int|null}
+     * @return array{
+     *     activities: int,
+     *     activities_change_percent: int,
+     *     activities_change_direction: 'up'|'down'|'unchanged',
+     *     repos_touched: int,
+     *     prs_updated: int,
+     *     prs_merged: int,
+     *     production_deploys: int|null
+     * }
      */
     private function last24HoursSummary(array $installationIds, array $actorLogins): array
     {
-        $since = CarbonImmutable::now('UTC')->subDay();
+        $now = CarbonImmutable::now('UTC');
+        $since = $now->subDay();
+        $previousSince = $now->subDays(2);
+
+        $activities = $this->activityCountBetween($installationIds, $actorLogins, $since, $now);
+        $previousActivities = $this->activityCountBetween($installationIds, $actorLogins, $previousSince, $since);
 
         $commitRepositoryIds = GitHubCommit::query()
             ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
             ->whereIn('author_login', $actorLogins)
             ->where('authored_at', '>=', $since)
+            ->where('authored_at', '<', $now)
             ->pluck('github_repository_id');
 
         $pullRequests = GitHubPullRequest::query()
             ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
             ->whereIn('author_login', $actorLogins)
-            ->where(function ($query) use ($since): void {
+            ->where(function ($query) use ($since, $now): void {
                 $query
-                    ->where('updated_at_github', '>=', $since)
-                    ->orWhere('opened_at', '>=', $since)
-                    ->orWhere('merged_at', '>=', $since);
+                    ->where(function ($query) use ($since, $now): void {
+                        $query
+                            ->where('updated_at_github', '>=', $since)
+                            ->where('updated_at_github', '<', $now);
+                    })
+                    ->orWhere(function ($query) use ($since, $now): void {
+                        $query
+                            ->where('opened_at', '>=', $since)
+                            ->where('opened_at', '<', $now);
+                    })
+                    ->orWhere(function ($query) use ($since, $now): void {
+                        $query
+                            ->where('merged_at', '>=', $since)
+                            ->where('merged_at', '<', $now);
+                    });
             })
             ->get(['id', 'github_repository_id', 'merged_at']);
 
@@ -399,6 +425,7 @@ final readonly class GitHubAppController
             ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
             ->whereIn('author_login', $actorLogins)
             ->where('submitted_at', '>=', $since)
+            ->where('submitted_at', '<', $now)
             ->get(['id', 'github_pull_request_id']);
 
         $reviewRepositoryIds = $reviews
@@ -406,7 +433,8 @@ final readonly class GitHubAppController
             ->filter();
 
         return [
-            'activities' => $commitRepositoryIds->count() + $pullRequests->count() + $reviews->count(),
+            'activities' => $activities,
+            ...$this->activityChangeMeta($activities, $previousActivities),
             'repos_touched' => $commitRepositoryIds
                 ->concat($pullRequests->pluck('github_repository_id'))
                 ->concat($reviewRepositoryIds)
@@ -415,6 +443,82 @@ final readonly class GitHubAppController
             'prs_updated' => $pullRequests->count(),
             'prs_merged' => $pullRequests->whereNotNull('merged_at')->count(),
             'production_deploys' => null,
+        ];
+    }
+
+    private function activityCountBetween(
+        array $installationIds,
+        array $actorLogins,
+        CarbonImmutable $since,
+        CarbonImmutable $until,
+    ): int {
+        $commitCount = GitHubCommit::query()
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('authored_at', '>=', $since)
+            ->where('authored_at', '<', $until)
+            ->count();
+
+        $pullRequestCount = GitHubPullRequest::query()
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where(function ($query) use ($since, $until): void {
+                $query
+                    ->where(function ($query) use ($since, $until): void {
+                        $query
+                            ->where('updated_at_github', '>=', $since)
+                            ->where('updated_at_github', '<', $until);
+                    })
+                    ->orWhere(function ($query) use ($since, $until): void {
+                        $query
+                            ->where('opened_at', '>=', $since)
+                            ->where('opened_at', '<', $until);
+                    })
+                    ->orWhere(function ($query) use ($since, $until): void {
+                        $query
+                            ->where('merged_at', '>=', $since)
+                            ->where('merged_at', '<', $until);
+                    });
+            })
+            ->count();
+
+        $reviewCount = GitHubPullRequestReview::query()
+            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('submitted_at', '>=', $since)
+            ->where('submitted_at', '<', $until)
+            ->count();
+
+        return $commitCount + $pullRequestCount + $reviewCount;
+    }
+
+    /**
+     * @return array{
+     *     activities_change_percent: int,
+     *     activities_change_direction: 'up'|'down'|'unchanged'
+     * }
+     */
+    private function activityChangeMeta(int $current, int $previous): array
+    {
+        if ($current === $previous) {
+            return [
+                'activities_change_percent' => 0,
+                'activities_change_direction' => 'unchanged',
+            ];
+        }
+
+        if ($previous === 0) {
+            return [
+                'activities_change_percent' => 100,
+                'activities_change_direction' => 'up',
+            ];
+        }
+
+        $percent = (int) round(abs($current - $previous) / $previous * 100);
+
+        return [
+            'activities_change_percent' => $percent,
+            'activities_change_direction' => $current > $previous ? 'up' : 'down',
         ];
     }
 

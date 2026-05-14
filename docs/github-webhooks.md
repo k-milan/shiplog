@@ -1,6 +1,6 @@
 # GitHub Webhooks
 
-This document tracks the GitHub App events Shiplog currently handles, where they are stored, and events we may add later.
+This document tracks the GitHub App events Sheep currently handles, where they are stored, and events we may add later.
 
 ## Current App Permissions
 
@@ -46,7 +46,7 @@ Current subscribed events:
 | `pull_request_review_comment` | Not implemented | Pull requests: Read-only | New `github_pull_request_review_comments` table | Capture line-level code review comments for richer review activity. |
 | `pull_request_review_thread` | Not implemented | Pull requests: Read-only | New `github_pull_request_review_threads` table | Track resolved/unresolved review discussions. |
 | `issue_comment` | Not implemented | Issues or Pull requests: Read-only | New `github_issue_comments` table | Capture comments on issues and PR conversations. Useful for collaboration volume. |
-| `issues` | Not implemented | Issues: Read-only | New `github_issues` table | Track opened/closed/labeled/assigned issues if Shiplog expands beyond PR work. |
+| `issues` | Not implemented | Issues: Read-only | New `github_issues` table | Track opened/closed/labeled/assigned issues if Sheep expands beyond PR work. |
 | `repository` | Not implemented | Metadata: Read-only | Existing `github_repositories` or audit table | Keep names, visibility, archive/rename/delete state current. |
 | `star` | Not implemented | Metadata: Read-only | New `github_stars` or activity-only table | Track repo attention/growth; probably low priority for personal activity. |
 | `watch` | Not implemented | Metadata: Read-only | New `github_watches` or activity-only table | Track repo subscriptions; probably low priority. |
@@ -67,7 +67,7 @@ Do not add every event at once. Add the smallest event set that supports the das
 
 ## OAuth Roadmap
 
-GitHub App installation access is account-scoped. If the app is installed on `k-milan` with "all repositories", Shiplog can receive events for repositories owned by `k-milan`, but not every repository that `k-milan` can personally access as a collaborator.
+GitHub App installation access is account-scoped. If the app is installed on `k-milan` with "all repositories", Sheep can receive events for repositories owned by `k-milan`, but not every repository that `k-milan` can personally access as a collaborator.
 
 For collaborator/contributor repositories, we likely need GitHub OAuth later:
 
@@ -81,9 +81,9 @@ For collaborator/contributor repositories, we likely need GitHub OAuth later:
 
 Likely long-term model:
 
-1. Keep GitHub App installation for webhook-driven, real-time data where the owner/org installs Shiplog.
+1. Keep GitHub App installation for webhook-driven, real-time data where the owner/org installs Sheep.
 2. Add GitHub OAuth for "my personal contribution graph" across repos the user can access.
 3. Use scheduled polling/backfill for OAuth-visible collaborator repos because webhooks may not be available.
 4. Clearly label data source per activity later: `webhook`, `app_backfill`, `oauth_sync`, or `public_event`.
 
-Open product question: decide whether Shiplog is primarily an installed-app repo dashboard, a personal contribution dashboard, or a hybrid. The hybrid gives the best coverage but adds auth, token storage, sync scheduling, deduplication, and permission UX.
+Open product question: decide whether Sheep is primarily an installed-app repo dashboard, a personal contribution dashboard, or a hybrid. The hybrid gives the best coverage but adds auth, token storage, sync scheduling, deduplication, and permission UX.

@@ -174,6 +174,15 @@ it('redirects to github app installation url', function (): void {
     $response->assertRedirect('https://github.com/apps/my-test-app/installations/new');
 });
 
+it('redirects to settings when github app name is not configured', function (): void {
+    config(['github.app_name' => null]);
+
+    $response = $this->get(route('github-apps.redirect'));
+
+    $response->assertRedirect(route('github-apps.index'))
+        ->assertSessionHas('status', 'github-app-misconfigured');
+});
+
 it('handles github callback and connects installation', function (): void {
     Bus::fake();
 

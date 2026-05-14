@@ -31,6 +31,8 @@ jobs:
         run: npm ci
 
       - name: Build frontend assets
+        env:
+          VITE_APP_NAME: Sheep
         run: npm run build
 
       - name: Setup SSH
@@ -68,6 +70,8 @@ jobs:
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
+
+            php artisan tinker --execute="abort_unless(filled(config('github.app_name')), 1, 'GITHUB_APP_NAME is missing or empty after config:cache');"
 
             sudo /usr/bin/supervisorctl restart sheep-worker:*
           EOF

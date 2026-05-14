@@ -360,11 +360,16 @@ export default function GitHubIndex({
             'last7DaysActivity',
             'activityHeatmap',
             'todayActivityByRepository',
+            'activityItems',
         ],
+        headers: {
+            'X-Inertia-Infinite-Scroll-Merge-Intent': 'prepend',
+        },
         data: {
             account_filter: 1,
             selected_installations: selectedInstallationIds,
             timezone: displayTimezone,
+            activity: 1,
         },
     });
 

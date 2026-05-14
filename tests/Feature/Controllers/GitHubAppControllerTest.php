@@ -117,6 +117,23 @@ it('paginates activity items ten at a time', function (): void {
         ->assertInertia(fn ($page) => $page
             ->has('activityItems.data', 10)
             ->where('activityItems.data.0.title', 'Commit 11'));
+
+    $prependPoll = $this
+        ->withHeaders([
+            'X-Inertia-Partial-Component' => 'settings/github/index',
+            'X-Inertia-Partial-Data' => 'activityItems',
+            'X-Inertia-Infinite-Scroll-Merge-Intent' => 'prepend',
+        ])
+        ->get(route('github-apps.index', [
+            'account_filter' => 1,
+            'selected_installations' => [$installation->id],
+            'activity' => 1,
+        ]));
+
+    $prependPoll->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('activityItems.data', 10)
+            ->where('activityItems.data.0.title', 'Commit 11'));
 });
 
 it('compares last twenty four hour activities against the previous day window', function (): void {

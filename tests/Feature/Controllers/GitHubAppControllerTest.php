@@ -119,6 +119,53 @@ it('paginates activity items ten at a time', function (): void {
             ->where('activityItems.data.0.title', 'Commit 11'));
 });
 
+it('compares last twenty four hour activities against the previous day window', function (): void {
+    $now = Carbon\CarbonImmutable::parse('2026-05-14 12:00:00', 'UTC');
+    $this->travelTo($now);
+
+    $installation = GitHubAppInstallation::factory()->create([
+        'account_login' => 'octocat',
+    ]);
+    $repository = GitHubRepository::query()->create([
+        'github_app_installation_id' => $installation->id,
+        'github_id' => 1001,
+        'name' => 'demo',
+        'full_name' => 'myorg/demo',
+        'owner_login' => 'myorg',
+        'private' => false,
+        'default_branch' => 'main',
+        'html_url' => 'https://github.com/myorg/demo',
+    ]);
+
+    foreach ([1, 2, 3] as $hoursAgo) {
+        GitHubCommit::query()->create([
+            'github_repository_id' => $repository->id,
+            'sha' => sprintf('recent-sha-%d', $hoursAgo),
+            'message' => "Recent commit {$hoursAgo}",
+            'author_login' => 'octocat',
+            'authored_at' => $now->subHours($hoursAgo),
+            'html_url' => "https://github.com/myorg/demo/commit/recent-sha-{$hoursAgo}",
+        ]);
+    }
+
+    GitHubCommit::query()->create([
+        'github_repository_id' => $repository->id,
+        'sha' => 'previous-sha',
+        'message' => 'Previous day commit',
+        'author_login' => 'octocat',
+        'authored_at' => $now->subHours(30),
+        'html_url' => 'https://github.com/myorg/demo/commit/previous-sha',
+    ]);
+
+    $response = $this->get(route('github-apps.index'));
+
+    $response->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('last24HoursSummary.activities', 3)
+            ->where('last24HoursSummary.activities_change_percent', 200)
+            ->where('last24HoursSummary.activities_change_direction', 'up'));
+});
+
 it('redirects to github app installation url', function (): void {
     config(['github.app_name' => 'my-test-app']);
 

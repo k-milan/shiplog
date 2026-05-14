@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ChartContainer } from '@/components/ui/chart';
 import { Checkbox } from '@/components/ui/checkbox';
 import AppearanceToggleTab from '@/components/appearance-tabs';
+import SheepIcon from '@/components/sheep-icon';
 import {
     Dialog,
     DialogContent,
@@ -38,12 +39,14 @@ import {
 import {
     Check,
     GitMerge,
-    GitBranch,
     GitCommitHorizontal,
     GitPullRequest,
+    ListChecks,
     MessageSquareText,
     Plus,
     Trash2,
+    TrendingDown,
+    TrendingUp,
     X,
 } from 'lucide-react';
 import {
@@ -79,6 +82,8 @@ interface GitHubInstallation {
 
 interface Last24HoursSummary {
     activities: number;
+    activities_change_percent: number;
+    activities_change_direction: 'up' | 'down' | 'unchanged';
     repos_touched: number;
     prs_updated: number;
     prs_merged: number;
@@ -304,6 +309,8 @@ export default function GitHubIndex({
     aggregationTimezone = 'UTC',
     last24HoursSummary = {
         activities: 0,
+        activities_change_percent: 0,
+        activities_change_direction: 'unchanged',
         repos_touched: 0,
         prs_updated: 0,
         prs_merged: 0,
@@ -329,7 +336,7 @@ export default function GitHubIndex({
             return 'blue';
         }
 
-        const saved = window.localStorage.getItem('shiplog-accent');
+        const saved = window.localStorage.getItem('sheep-accent');
 
         return saved !== null && saved in accentPresets
             ? (saved as AccentColor)
@@ -394,7 +401,7 @@ export default function GitHubIndex({
 
     const updateAccentColor = (color: AccentColor) => {
         setAccentColor(color);
-        window.localStorage.setItem('shiplog-accent', color);
+        window.localStorage.setItem('sheep-accent', color);
     };
 
     return (
@@ -402,18 +409,18 @@ export default function GitHubIndex({
             className="min-h-screen bg-background [background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,#000000_11%,transparent)_0.75px,transparent_0)] [background-size:13px_13px] text-foreground dark:[background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,#ffffff_8%,transparent)_0.75px,transparent_0)]"
             style={
                 {
-                    '--shiplog-accent': accent.color,
-                    '--shiplog-accent-soft': accent.soft,
-                    '--shiplog-accent-border': accent.border,
-                    '--shiplog-accent-shadow': accent.shadow,
-                    '--shiplog-accent-1': accent.scale[0],
-                    '--shiplog-accent-2': accent.scale[1],
-                    '--shiplog-accent-3': accent.scale[2],
-                    '--shiplog-accent-4': accent.scale[3],
+                    '--sheep-accent': accent.color,
+                    '--sheep-accent-soft': accent.soft,
+                    '--sheep-accent-border': accent.border,
+                    '--sheep-accent-shadow': accent.shadow,
+                    '--sheep-accent-1': accent.scale[0],
+                    '--sheep-accent-2': accent.scale[1],
+                    '--sheep-accent-3': accent.scale[2],
+                    '--sheep-accent-4': accent.scale[3],
                 } as React.CSSProperties
             }
         >
-            <Head title="Shiplog" />
+            <Head title="Sheep" />
 
             <TopNav
                 installations={installations}
@@ -424,8 +431,8 @@ export default function GitHubIndex({
                 onAccentColorChange={updateAccentColor}
             />
 
-            <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 pt-24 pb-10 sm:px-6">
-                <div className="space-y-6">
+            <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-6xl flex-col px-4 pt-4 pb-10 sm:px-6">
+                <div className="min-w-0 space-y-6">
                     {status === 'github-app-connected' && (
                         <StatusMessage variant="success">
                             GitHub account connected. We are syncing its
@@ -511,14 +518,14 @@ function TopNav({
 }) {
     return (
         <div className="sticky top-0 z-40">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background via-background/80 to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-14 bg-gradient-to-b from-background via-background/80 to-transparent" />
             <nav className="relative mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
                 <a
                     href="/"
                     className="flex items-center gap-2 font-mono text-sm font-semibold"
                 >
-                    <GitBranch className="h-4 w-4" />
-                    Shiplog
+                    <SheepIcon className="h-8 w-8 shrink-0" />
+                    Sheep
                 </a>
 
                 <div className="flex items-center gap-5">
@@ -625,7 +632,7 @@ function AccountsDialog({
                 <div className="space-y-4">
                     {installations.length === 0 ? (
                         <div className="rounded-md border border-dashed px-4 py-8 text-center">
-                            <GitBranch className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
+                            <SheepIcon className="mx-auto mb-3 h-12 w-12 text-muted-foreground" />
                             <p className="font-mono text-sm font-medium">
                                 No accounts connected
                             </p>
@@ -702,7 +709,7 @@ function SettingsDialog({
                                             onClick={() =>
                                                 onAccentColorChange(color)
                                             }
-                                            className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-left font-mono text-xs transition-colors hover:bg-muted ${isSelected ? 'border-[var(--shiplog-accent)] bg-[var(--shiplog-accent-soft)] text-foreground' : 'border-border text-muted-foreground'}`}
+                                            className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-left font-mono text-xs transition-colors hover:bg-muted ${isSelected ? 'border-[var(--sheep-accent)] bg-[var(--sheep-accent-soft)] text-foreground' : 'border-border text-muted-foreground'}`}
                                         >
                                             <span
                                                 className="h-3 w-3 shrink-0 rounded-full"
@@ -728,7 +735,7 @@ function SettingsDialog({
 function EmptyState() {
     return (
         <section className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
-            <GitBranch className="mb-3 h-8 w-8 text-muted-foreground" />
+            <SheepIcon className="mb-3 h-16 w-16 text-muted-foreground" />
             <p className="font-mono text-sm font-medium">
                 No GitHub accounts connected
             </p>
@@ -873,13 +880,43 @@ function Last24HoursSummaryCards({
     summary: Last24HoursSummary;
     repositories: RepositoryActivityPartition[];
 }) {
+
     return (
         <section className="space-y-3">
             <h2 className="font-mono text-sm font-semibold">Last 24h</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <MiniSummaryCard
                     label="activities"
-                    value={summary.activities}
+                    value={
+                        <span className="inline-flex flex-wrap items-baseline gap-x-1">
+                            <span>{summary.activities}</span>
+                            <span
+                                className={`inline-flex items-center gap-0.5 font-mono text-[0.65rem] font-medium leading-none ${
+                                    summary.activities_change_direction ===
+                                    'up'
+                                        ? 'text-emerald-500'
+                                        : summary.activities_change_direction ===
+                                            'down'
+                                          ? 'text-red-500'
+                                          : 'text-muted-foreground'
+                                }`}
+                            >
+                                (
+                                {summary.activities_change_direction ===
+                                'unchanged'
+                                    ? '0%'
+                                    : `${summary.activities_change_percent}%`}
+                                {summary.activities_change_direction ===
+                                'up' ? (
+                                    <TrendingUp className="h-2.5 w-2.5" />
+                                ) : summary.activities_change_direction ===
+                                  'down' ? (
+                                    <TrendingDown className="h-2.5 w-2.5" />
+                                ) : null}
+                                )
+                            </span>
+                        </span>
+                    }
                 />
                 <MiniSummaryCard
                     label="repos touched"
@@ -914,7 +951,7 @@ function MiniSummaryCard({
     muted = false,
 }: {
     label: string;
-    value: number | string;
+    value: number | string | ReactNode;
     muted?: boolean;
 }) {
     return (
@@ -931,55 +968,67 @@ function MiniSummaryCard({
     );
 }
 
+function PullRequestPanelEmptyState({
+    icon,
+    children,
+}: {
+    icon: ReactNode;
+    children: ReactNode;
+}) {
+    return (
+        <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+            <div className="mb-2 text-muted-foreground/50">{icon}</div>
+            <p className="max-w-[16rem] font-mono text-xs leading-relaxed text-muted-foreground">
+                {children}
+            </p>
+        </div>
+    );
+}
+
 function PullRequestStatusPanel({
     pullRequests,
 }: {
     pullRequests: PullRequestStatusItem[];
 }) {
-    const isPreview = pullRequests.length === 0;
-    const displayedPullRequests = isPreview
-        ? previewPullRequestStatusItems()
-        : pullRequests;
-
     return (
-        <section className="space-y-3">
-            <div className="flex items-end justify-between gap-4">
-                <div>
-                    <h2 className="font-mono text-sm font-semibold">
-                        PR Status
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                        Drafts, open PRs, and PRs merged today
-                    </p>
-                </div>
+        <section className="flex h-52 min-h-0 flex-col gap-3">
+            <div className="flex shrink-0 items-end justify-between gap-4">
+                <h2 className="font-mono text-sm font-semibold">PR Status</h2>
                 <p className="font-mono text-xs text-muted-foreground">
-                    {isPreview ? 'preview' : `${pullRequests.length} total`}
+                    {pullRequests.length} total
                 </p>
             </div>
 
-            <TooltipProvider delayDuration={100}>
-                <div className="grid gap-1.5">
-                {displayedPullRequests.map((pullRequest) => (
-                    <a
-                        key={pullRequest.id}
-                        href={isPreview ? undefined : pullRequest.url}
-                        target={isPreview ? undefined : '_blank'}
-                        rel={isPreview ? undefined : 'noreferrer'}
-                        aria-disabled={isPreview}
-                        onClick={(event) => {
-                            if (isPreview) {
-                                event.preventDefault();
-                            }
-                        }}
-                        className={`group grid grid-cols-[1rem_minmax(0,1fr)] gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--shiplog-accent-soft)] ${isPreview ? 'opacity-75' : ''}`}
-                    >
+            <div className="min-h-0 flex-1">
+            {pullRequests.length === 0 ? (
+                <PullRequestPanelEmptyState
+                    icon={<GitPullRequest className="h-6 w-6" />}
+                >
+                    No open or recently merged PRs for selected accounts.
+                </PullRequestPanelEmptyState>
+            ) : (
+                <TooltipProvider delayDuration={100}>
+                        <ScrollFade
+                            axis="vertical"
+                            intensity={0.85}
+                            className="h-full"
+                        >
+                    <div className="grid gap-1.5">
+                        {pullRequests.map((pullRequest) => (
+                            <a
+                                key={pullRequest.id}
+                                href={pullRequest.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="group grid grid-cols-[1rem_minmax(0,1fr)] gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--sheep-accent-soft)]"
+                            >
                         <PullRequestStatusIndicator status={pullRequest.status} />
 
                         <div className="min-w-0">
                             <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
                                 <Badge
                                     variant="outline"
-                                    className="h-4 max-w-full rounded-sm border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--shiplog-accent)]"
+                                    className="h-4 max-w-full rounded-sm border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--sheep-accent)]"
                                     title={
                                         pullRequest.repository ??
                                         'Unknown repo'
@@ -1009,65 +1058,13 @@ function PullRequestStatusPanel({
                         </div>
                     </a>
                 ))}
-                </div>
-            </TooltipProvider>
+                    </div>
+                        </ScrollFade>
+                </TooltipProvider>
+            )}
+            </div>
         </section>
     );
-}
-
-function previewPullRequestStatusItems(): PullRequestStatusItem[] {
-    return [
-        {
-            id: -1,
-            title: '[SHIP-18] Add activity event normalization',
-            repository: 'k-milan/shiplog',
-            number: 128,
-            status: 'open',
-            url: '#',
-            updated_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-            merged_at: null,
-        },
-        {
-            id: -2,
-            title: '[MNT-10] Display requests and notify caregivers',
-            repository: 'kfm-rcc/royalcarecompanion-web',
-            number: 64,
-            status: 'draft',
-            url: '#',
-            updated_at: new Date(Date.now() - 46 * 60 * 1000).toISOString(),
-            merged_at: null,
-        },
-        {
-            id: -3,
-            title: '[CRTE-31] Partner dashboard polish',
-            repository: 'k-milan/courte-ui',
-            number: 41,
-            status: 'approved',
-            url: '#',
-            updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-            merged_at: null,
-        },
-        {
-            id: -4,
-            title: '[RCC-22] Fix caregiver notification edge case',
-            repository: 'kfm-rcc/royalcarecompanion-web',
-            number: 65,
-            status: 'changes requested',
-            url: '#',
-            updated_at: new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(),
-            merged_at: null,
-        },
-        {
-            id: -5,
-            title: '[CRTE-30] Merge availability exceptions',
-            repository: 'k-milan/courte-ui',
-            number: 40,
-            status: 'merged today',
-            url: '#',
-            updated_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-            merged_at: new Date(Date.now() - 38 * 60 * 1000).toISOString(),
-        },
-    ];
 }
 
 function PullRequestsToReviewPanel({
@@ -1076,26 +1073,29 @@ function PullRequestsToReviewPanel({
     reviewRequests: PullRequestToReviewItem[];
 }) {
     return (
-        <section className="space-y-3">
-            <div className="flex items-end justify-between gap-4">
-                <div>
-                    <h2 className="font-mono text-sm font-semibold">
-                        PRs To Review
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                        Open PRs requesting your review
-                    </p>
-                </div>
+        <section className="flex h-52 min-h-0 flex-col gap-3">
+            <div className="flex shrink-0 items-end justify-between gap-4">
+                <h2 className="font-mono text-sm font-semibold">
+                    Pending Reviews
+                </h2>
                 <p className="font-mono text-xs text-muted-foreground">
                     {reviewRequests.length} total
                 </p>
             </div>
 
+            <div className="min-h-0 flex-1">
             {reviewRequests.length === 0 ? (
-                <div className="rounded-md border bg-background/35 px-3 py-3 text-xs text-muted-foreground">
+                <PullRequestPanelEmptyState
+                    icon={<ListChecks className="h-6 w-6" />}
+                >
                     No open PRs are requesting review from selected accounts.
-                </div>
+                </PullRequestPanelEmptyState>
             ) : (
+                    <ScrollFade
+                        axis="vertical"
+                        intensity={0.85}
+                        className="h-full"
+                    >
                 <div className="grid gap-1.5">
                     {reviewRequests.map((pullRequest) => (
                         <a
@@ -1103,12 +1103,12 @@ function PullRequestsToReviewPanel({
                             href={pullRequest.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="group block rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--shiplog-accent-soft)]"
+                            className="group block rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--sheep-accent-soft)]"
                         >
                             <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
                                 <Badge
                                     variant="outline"
-                                    className="h-4 max-w-full rounded-sm border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--shiplog-accent)]"
+                                    className="h-4 max-w-full rounded-sm border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--sheep-accent)]"
                                     title={
                                         pullRequest.repository ??
                                         'Unknown repo'
@@ -1138,7 +1138,9 @@ function PullRequestsToReviewPanel({
                         </a>
                     ))}
                 </div>
+                    </ScrollFade>
             )}
+            </div>
         </section>
     );
 }
@@ -1218,7 +1220,7 @@ function pullRequestStatusDetails(status: string): {
     return {
         label: 'Open',
         className:
-            'border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] text-[var(--shiplog-accent)] shadow-[0_0_6px_var(--shiplog-accent-shadow)]',
+            'border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] text-[var(--sheep-accent)] shadow-[0_0_6px_var(--sheep-accent-shadow)]',
         icon: <GitPullRequest className={iconClassName} />,
     };
 }
@@ -1229,10 +1231,10 @@ function TodayRepositoryPartition({
     repositories: RepositoryActivityPartition[];
 }) {
     const colors = [
-        'bg-[var(--shiplog-accent-4)]',
-        'bg-[var(--shiplog-accent-3)]',
-        'bg-[var(--shiplog-accent-2)]',
-        'bg-[var(--shiplog-accent-1)]',
+        'bg-[var(--sheep-accent-4)]',
+        'bg-[var(--sheep-accent-3)]',
+        'bg-[var(--sheep-accent-2)]',
+        'bg-[var(--sheep-accent-1)]',
     ];
 
     return (
@@ -1348,7 +1350,7 @@ function ActivityChartsGrid({
     activityHeatmap: ActivityHeatmap;
 }) {
     return (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-2">
             <Last7DaysActivityChart data={last7DaysActivity} />
             <ActivityHeatmapPanel heatmap={activityHeatmap} />
         </div>
@@ -1422,20 +1424,58 @@ function ActivityFeedPanel({
 }
 
 function ActivityHeatmapPanel({ heatmap }: { heatmap: ActivityHeatmap }) {
-    return (
-        <section className="space-y-3">
-            <div>
-                <div>
-                    <h2 className="font-mono text-sm font-semibold">
-                        Activity Heatmap
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                        Daily activity over the last 6 months
-                    </p>
-                </div>
-            </div>
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [cellSize, setCellSize] = useState(13);
 
-            <div className="overflow-x-auto rounded-md border bg-background/35 p-3">
+    const weekCount = useMemo(() => {
+        const start = new Date(`${heatmap.start_date}T00:00:00`);
+        const end = new Date(`${heatmap.end_date}T00:00:00`);
+        const dayCount =
+            Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+
+        return Math.ceil((dayCount + start.getDay()) / 7);
+    }, [heatmap.end_date, heatmap.start_date]);
+
+    useEffect(() => {
+        const element = containerRef.current;
+
+        if (!element) {
+            return;
+        }
+
+        const updateCellSize = (): void => {
+            const gap = 3;
+            const labelColumn = 18;
+            const availableWidth = element.clientWidth - labelColumn;
+            const nextCellSize = Math.floor(
+                (availableWidth - gap * (weekCount - 1)) / weekCount,
+            );
+
+            setCellSize(Math.max(7, Math.min(13, nextCellSize)));
+        };
+
+        updateCellSize();
+
+        const resizeObserver = new ResizeObserver(updateCellSize);
+        resizeObserver.observe(element);
+        window.addEventListener('resize', updateCellSize);
+
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener('resize', updateCellSize);
+        };
+    }, [weekCount]);
+
+    return (
+        <section className="min-w-0 space-y-3">
+            <h2 className="font-mono text-sm font-semibold">
+                Activity Heatmap
+            </h2>
+
+            <div
+                ref={containerRef}
+                className="min-w-0 rounded-md border bg-background/35 p-3"
+            >
                 <Heatmap
                     data={heatmap.data}
                     startDate={new Date(`${heatmap.start_date}T00:00:00`)}
@@ -1443,15 +1483,15 @@ function ActivityHeatmapPanel({ heatmap }: { heatmap: ActivityHeatmap }) {
                     colorMode="discrete"
                     colorScale={[
                         'oklch(26.9% 0 0 / 0.72)',
-                        'var(--shiplog-accent-1)',
-                        'var(--shiplog-accent-2)',
-                        'var(--shiplog-accent-3)',
-                        'var(--shiplog-accent-4)',
+                        'var(--sheep-accent-1)',
+                        'var(--sheep-accent-2)',
+                        'var(--sheep-accent-3)',
+                        'var(--sheep-accent-4)',
                     ]}
-                    cellSize={13}
+                    cellSize={cellSize}
                     gap={3}
                     daysOfTheWeek="single letter"
-                    className="w-max font-mono"
+                    className="w-full font-mono"
                     valueDisplayFunction={(value) =>
                         `${value} activit${value === 1 ? 'y' : 'ies'}`
                     }
@@ -1470,24 +1510,15 @@ function ActivityHeatmapPanel({ heatmap }: { heatmap: ActivityHeatmap }) {
 
 function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
     return (
-        <section className="space-y-3">
-            <div>
-                <div>
-                    <h2 className="font-mono text-sm font-semibold">
-                        Last 7 Days
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                        Total activity per day
-                    </p>
-                </div>
-            </div>
+        <section className="min-w-0 space-y-3">
+            <h2 className="font-mono text-sm font-semibold">Last 7 Days</h2>
 
-            <div className="rounded-md border bg-background/35 p-3">
+            <div className="min-w-0 overflow-hidden rounded-md border bg-background/35 p-3">
                 <ChartContainer>
                     <AreaChart
                         accessibilityLayer
                         data={data}
-                        margin={{ left: 0, right: 8, top: 14, bottom: 0 }}
+                        margin={{ left: 0, right: 4, top: 14, bottom: 0 }}
                     >
                         <defs>
                             <linearGradient
@@ -1499,12 +1530,12 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
                             >
                                 <stop
                                     offset="5%"
-                                    stopColor="var(--shiplog-accent)"
+                                    stopColor="var(--sheep-accent)"
                                     stopOpacity={0.46}
                                 />
                                 <stop
                                     offset="95%"
-                                    stopColor="var(--shiplog-accent)"
+                                    stopColor="var(--sheep-accent)"
                                     stopOpacity={0.04}
                                 />
                             </linearGradient>
@@ -1519,20 +1550,21 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
                             dataKey="label"
                             axisLine={false}
                             tickLine={false}
-                            tickMargin={10}
-                            tick={{ fontSize: 11 }}
+                            tickMargin={8}
+                            minTickGap={8}
+                            tick={{ fontSize: 10 }}
                         />
                         <YAxis
                             axisLine={false}
                             tickLine={false}
-                            tickMargin={8}
+                            tickMargin={4}
                             allowDecimals={false}
-                            width={28}
-                            tick={{ fontSize: 11 }}
+                            width={24}
+                            tick={{ fontSize: 10 }}
                         />
                         <Tooltip
                             cursor={{
-                                stroke: 'var(--shiplog-accent)',
+                                stroke: 'var(--sheep-accent)',
                                 strokeOpacity: 0.32,
                             }}
                             content={({ active, payload, label }) => {
@@ -1555,17 +1587,17 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
                         <Area
                             type="monotone"
                             dataKey="total"
-                            stroke="var(--shiplog-accent)"
+                            stroke="var(--sheep-accent)"
                             strokeWidth={2}
                             fill="url(#activity-total)"
                             dot={{
                                 r: 3,
-                                fill: 'var(--shiplog-accent)',
+                                fill: 'var(--sheep-accent)',
                                 strokeWidth: 0,
                             }}
                             activeDot={{
                                 r: 4,
-                                fill: 'var(--shiplog-accent)',
+                                fill: 'var(--sheep-accent)',
                                 strokeWidth: 0,
                             }}
                         />
@@ -1616,10 +1648,10 @@ const ActivityTimeline = function ActivityTimeline({
 
     return (
         <div
-            className="relative flex h-full min-h-0 flex-col [--timeline-color:var(--shiplog-accent)]"
+            className="relative flex h-full min-h-0 flex-col [--timeline-color:var(--sheep-accent)]"
             style={
                 {
-                    '--timeline-color': 'var(--shiplog-accent)',
+                    '--timeline-color': 'var(--sheep-accent)',
                 } as React.CSSProperties
             }
         >
@@ -1704,7 +1736,7 @@ const ActivityTimelineItem = memo(function ActivityTimelineItem({
                     {item.repository && (
                         <Badge
                             variant="outline"
-                            className="h-4 max-w-36 truncate rounded-sm border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--shiplog-accent)]"
+                            className="h-4 max-w-36 truncate rounded-sm border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--sheep-accent)]"
                             title={item.repository}
                         >
                             {shortRepositoryName(item.repository)}
@@ -1744,7 +1776,7 @@ function StatusMessage({
     const className = {
         neutral: 'border-border text-muted-foreground',
         success:
-            'border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] text-[var(--shiplog-accent)]',
+            'border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] text-[var(--sheep-accent)]',
         error: 'border-destructive/30 text-destructive',
     }[variant];
 

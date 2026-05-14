@@ -10,7 +10,7 @@ function ChartContainer({
     className?: string;
 }) {
     return (
-        <div data-slot="chart" className={cn('h-56 w-full', className)}>
+        <div data-slot="chart" className={cn('h-56 w-full min-w-0 max-w-full', className)}>
             <ResponsiveContainer width="100%" height="100%">
                 {children}
             </ResponsiveContainer>

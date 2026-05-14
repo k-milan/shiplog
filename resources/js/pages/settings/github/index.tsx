@@ -420,7 +420,7 @@ export default function GitHubIndex({
                 } as React.CSSProperties
             }
         >
-            <Head title="Sheep" />
+            <Head />
 
             <TopNav
                 installations={installations}
@@ -449,6 +449,14 @@ export default function GitHubIndex({
                     {status === 'github-app-error' && (
                         <StatusMessage variant="error">
                             Failed to connect GitHub account. Please try again.
+                        </StatusMessage>
+                    )}
+
+                    {status === 'github-app-misconfigured' && (
+                        <StatusMessage variant="error">
+                            GitHub App is not configured on the server. Set
+                            GITHUB_APP_NAME to your app&apos;s URL slug in
+                            production, then run config:cache.
                         </StatusMessage>
                     )}
 

@@ -64,6 +64,13 @@ final readonly class GitHubAppController
     {
         $appName = config('github.app_name');
 
+        if (! is_string($appName) || $appName === '') {
+            Log::error('GitHub App redirect failed: GITHUB_APP_NAME is not configured.');
+
+            return to_route('github-apps.index')
+                ->with('status', 'github-app-misconfigured');
+        }
+
         return redirect("https://github.com/apps/{$appName}/installations/new");
     }
 

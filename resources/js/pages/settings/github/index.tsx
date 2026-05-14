@@ -280,9 +280,14 @@ interface Paginated<T> {
     total?: number;
 }
 
+function browserDisplayTimezone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 interface Props extends Record<string, unknown> {
     installations: GitHubInstallation[];
     selectedInstallationIds: number[];
+    aggregationTimezone: string;
     last24HoursSummary: Last24HoursSummary;
     pullRequestStatusItems: PullRequestStatusItem[];
     pullRequestsToReviewItems: PullRequestToReviewItem[];
@@ -296,6 +301,7 @@ interface Props extends Record<string, unknown> {
 export default function GitHubIndex({
     installations = [],
     selectedInstallationIds: initialSelectedInstallationIds = [],
+    aggregationTimezone = 'UTC',
     last24HoursSummary = {
         activities: 0,
         repos_touched: 0,
@@ -330,6 +336,7 @@ export default function GitHubIndex({
             : 'blue';
     });
     const accent = accentPresets[accentColor];
+    const displayTimezone = useMemo(() => browserDisplayTimezone(), []);
     const hasSyncInProgress = installations.some((installation) =>
         ['pending', 'syncing'].includes(installation.sync_status),
     );
@@ -350,8 +357,36 @@ export default function GitHubIndex({
         data: {
             account_filter: 1,
             selected_installations: selectedInstallationIds,
+            timezone: displayTimezone,
         },
     });
+
+    useEffect(() => {
+        if (aggregationTimezone === displayTimezone) {
+            return;
+        }
+
+        router.reload({
+            only: [
+                'aggregationTimezone',
+                'last24HoursSummary',
+                'pullRequestStatusItems',
+                'pullRequestsToReviewItems',
+                'last7DaysActivity',
+                'activityHeatmap',
+                'todayActivityByRepository',
+            ],
+            data: {
+                account_filter: 1,
+                selected_installations: selectedInstallationIds,
+                timezone: displayTimezone,
+            },
+        });
+    }, [
+        aggregationTimezone,
+        displayTimezone,
+        selectedInstallationIds,
+    ]);
 
     useEffect(() => {
         setSelectedInstallationIds(initialSelectedInstallationIds);
@@ -383,6 +418,7 @@ export default function GitHubIndex({
             <TopNav
                 installations={installations}
                 selectedInstallationIds={selectedInstallationIds}
+                displayTimezone={displayTimezone}
                 onSelectedInstallationIdsChange={setSelectedInstallationIds}
                 accentColor={accentColor}
                 onAccentColorChange={updateAccentColor}
@@ -441,6 +477,7 @@ export default function GitHubIndex({
 
                             <ActivityDashboardGrid
                                 selectedInstallationIds={selectedInstallationIds}
+                                displayTimezone={displayTimezone}
                                 pullRequests={pullRequestStatusItems}
                                 reviewRequests={pullRequestsToReviewItems}
                             />
@@ -460,12 +497,14 @@ export default function GitHubIndex({
 function TopNav({
     installations,
     selectedInstallationIds,
+    displayTimezone,
     onSelectedInstallationIdsChange,
     accentColor,
     onAccentColorChange,
 }: {
     installations: GitHubInstallation[];
     selectedInstallationIds: number[];
+    displayTimezone: string;
     onSelectedInstallationIdsChange: (installationIds: number[]) => void;
     accentColor: AccentColor;
     onAccentColorChange: (color: AccentColor) => void;
@@ -499,6 +538,7 @@ function TopNav({
                     <AccountsDialog
                         installations={installations}
                         selectedInstallationIds={selectedInstallationIds}
+                        displayTimezone={displayTimezone}
                         onSelectedInstallationIdsChange={
                             onSelectedInstallationIdsChange
                         }
@@ -512,10 +552,12 @@ function TopNav({
 function AccountsDialog({
     installations,
     selectedInstallationIds,
+    displayTimezone,
     onSelectedInstallationIdsChange,
 }: {
     installations: GitHubInstallation[];
     selectedInstallationIds: number[];
+    displayTimezone: string;
     onSelectedInstallationIdsChange: (installationIds: number[]) => void;
 }) {
     const selectedInstallationIdSet = useMemo(
@@ -528,6 +570,7 @@ function AccountsDialog({
         router.reload({
             only: [
                 'selectedInstallationIds',
+                'aggregationTimezone',
                 'activityItems',
                 'last24HoursSummary',
                 'pullRequestStatusItems',
@@ -540,6 +583,7 @@ function AccountsDialog({
             data: {
                 account_filter: 1,
                 selected_installations: nextInstallationIds,
+                timezone: displayTimezone,
             },
         });
     };
@@ -1224,10 +1268,12 @@ function TodayRepositoryPartition({
 
 function ActivityDashboardGrid({
     selectedInstallationIds,
+    displayTimezone,
     pullRequests,
     reviewRequests,
 }: {
     selectedInstallationIds: number[];
+    displayTimezone: string;
     pullRequests: PullRequestStatusItem[];
     reviewRequests: PullRequestToReviewItem[];
 }) {
@@ -1273,6 +1319,7 @@ function ActivityDashboardGrid({
             >
                 <ActivityFeedPanel
                     selectedInstallationIds={selectedInstallationIds}
+                    displayTimezone={displayTimezone}
                 />
             </div>
 
@@ -1310,8 +1357,10 @@ function ActivityChartsGrid({
 
 function ActivityFeedPanel({
     selectedInstallationIds,
+    displayTimezone,
 }: {
     selectedInstallationIds: number[];
+    displayTimezone: string;
 }) {
     const { activityItems } = usePage<Props>().props;
     const previousActivityIds = useRef<string[] | null>(null);
@@ -1364,6 +1413,7 @@ function ActivityFeedPanel({
             <div className="min-h-0 flex-1 overflow-hidden">
                 <ActivityTimeline
                     selectedInstallationIds={selectedInstallationIds}
+                    displayTimezone={displayTimezone}
                     newItemIds={newActivityItemIds}
                 />
             </div>
@@ -1528,9 +1578,11 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
 
 const ActivityTimeline = function ActivityTimeline({
     selectedInstallationIds,
+    displayTimezone,
     newItemIds,
 }: {
     selectedInstallationIds: number[];
+    displayTimezone: string;
     newItemIds: Set<string>;
 }) {
     const { activityItems } = usePage<Props>().props;
@@ -1540,9 +1592,10 @@ const ActivityTimeline = function ActivityTimeline({
             data: {
                 account_filter: 1,
                 selected_installations: selectedInstallationIds,
+                timezone: displayTimezone,
             },
         }),
-        [selectedInstallationIds],
+        [displayTimezone, selectedInstallationIds],
     );
 
     if (items.length === 0) {

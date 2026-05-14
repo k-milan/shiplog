@@ -112,12 +112,12 @@ final readonly class GitHubDataIngestionService
         );
     }
 
-    private function date(mixed $value): ?CarbonImmutable
+    private function date(mixed $value): ?string
     {
         if (! is_string($value) || $value === '') {
             return null;
         }
 
-        return CarbonImmutable::parse($value);
+        return CarbonImmutable::parse($value)->utc()->toDateTimeString();
     }
 }

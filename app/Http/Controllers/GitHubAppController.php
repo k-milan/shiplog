@@ -39,16 +39,18 @@ final readonly class GitHubAppController
             ->get(['id', 'installation_id', 'account_login', 'account_type', 'account_name', 'avatar_url', 'sync_status', 'sync_started_at', 'sync_finished_at', 'sync_error', 'created_at']);
         $selectedInstallationIds = $this->selectedInstallationIds($request, $installations->pluck('id')->all());
         $selectedActorLogins = $this->selectedActorLogins($selectedInstallationIds);
+        $displayTimezone = $this->displayTimezone($request);
 
         return Inertia::render('settings/github/index', [
             'installations' => $installations,
             'selectedInstallationIds' => $selectedInstallationIds,
+            'aggregationTimezone' => $displayTimezone,
             'last24HoursSummary' => $this->last24HoursSummary($selectedInstallationIds, $selectedActorLogins),
-            'pullRequestStatusItems' => $this->pullRequestStatusItems($selectedInstallationIds),
+            'pullRequestStatusItems' => $this->pullRequestStatusItems($selectedInstallationIds, $displayTimezone),
             'pullRequestsToReviewItems' => $this->pullRequestsToReviewItems($selectedInstallationIds),
-            'last7DaysActivity' => $this->last7DaysActivity($selectedInstallationIds, $selectedActorLogins),
-            'activityHeatmap' => $this->activityHeatmap($selectedInstallationIds, $selectedActorLogins),
-            'todayActivityByRepository' => $this->todayActivityByRepository($selectedInstallationIds, $selectedActorLogins),
+            'last7DaysActivity' => $this->last7DaysActivity($selectedInstallationIds, $selectedActorLogins, $displayTimezone),
+            'activityHeatmap' => $this->activityHeatmap($selectedInstallationIds, $selectedActorLogins, $displayTimezone),
+            'todayActivityByRepository' => $this->todayActivityByRepository($selectedInstallationIds, $selectedActorLogins, $displayTimezone),
             'activityItems' => Inertia::scroll($this->activityItems(
                 $selectedInstallationIds,
                 $selectedActorLogins,
@@ -235,9 +237,9 @@ final readonly class GitHubAppController
     /**
      * @return list<array{id: int, title: string, repository: string|null, number: int, status: string, url: string, updated_at: string|null, merged_at: string|null}>
      */
-    private function pullRequestStatusItems(array $installationIds): array
+    private function pullRequestStatusItems(array $installationIds, string $displayTimezone): array
     {
-        $today = $this->localTodayStart();
+        $today = $this->todayStart($displayTimezone);
         $tomorrow = $today->addDay();
         $authorLogins = GitHubAppInstallation::query()
             ->whereIn('id', $installationIds)
@@ -419,9 +421,9 @@ final readonly class GitHubAppController
     /**
      * @return list<array{date: string, label: string, total: int}>
      */
-    private function last7DaysActivity(array $installationIds, array $actorLogins): array
+    private function last7DaysActivity(array $installationIds, array $actorLogins, string $displayTimezone): array
     {
-        $start = $this->localTodayStart()->subDays(6);
+        $start = $this->todayStart($displayTimezone)->subDays(6);
         $startUtc = $this->utcBoundary($start);
         $days = collect(range(0, 6))
             ->map(fn (int $offset): CarbonImmutable => $start->addDays($offset));
@@ -431,7 +433,7 @@ final readonly class GitHubAppController
             ->whereIn('author_login', $actorLogins)
             ->where('authored_at', '>=', $startUtc)
             ->get(['authored_at'])
-            ->map(fn (GitHubCommit $commit): ?string => $this->localDateString($commit->getRawOriginal('authored_at')))
+            ->map(fn (GitHubCommit $commit): ?string => $this->dateStringInTimezone($commit->getRawOriginal('authored_at'), $displayTimezone))
             ->filter()
             ->countBy();
 
@@ -445,10 +447,11 @@ final readonly class GitHubAppController
                     ->orWhere('merged_at', '>=', $startUtc);
             })
             ->get(['opened_at', 'updated_at_github', 'merged_at'])
-            ->map(fn (GitHubPullRequest $pullRequest): ?string => $this->localDateString(
+            ->map(fn (GitHubPullRequest $pullRequest): ?string => $this->dateStringInTimezone(
                 $pullRequest->getRawOriginal('merged_at')
                     ?? $pullRequest->getRawOriginal('updated_at_github')
                     ?? $pullRequest->getRawOriginal('opened_at'),
+                $displayTimezone,
             ))
             ->filter()
             ->countBy();
@@ -458,7 +461,7 @@ final readonly class GitHubAppController
             ->whereIn('author_login', $actorLogins)
             ->where('submitted_at', '>=', $startUtc)
             ->get(['submitted_at'])
-            ->map(fn (GitHubPullRequestReview $review): ?string => $this->localDateString($review->getRawOriginal('submitted_at')))
+            ->map(fn (GitHubPullRequestReview $review): ?string => $this->dateStringInTimezone($review->getRawOriginal('submitted_at'), $displayTimezone))
             ->filter()
             ->countBy();
 
@@ -475,10 +478,10 @@ final readonly class GitHubAppController
     /**
      * @return array{start_date: string, end_date: string, total: int, data: list<array{date: string, value: int}>}
      */
-    private function activityHeatmap(array $installationIds, array $actorLogins): array
+    private function activityHeatmap(array $installationIds, array $actorLogins, string $displayTimezone): array
     {
-        $start = $this->localTodayStart()->subMonths(6)->addDay();
-        $end = $this->localTodayStart();
+        $start = $this->todayStart($displayTimezone)->subMonths(6)->addDay();
+        $end = $this->todayStart($displayTimezone);
         $startUtc = $this->utcBoundary($start);
         $days = collect(range(0, $start->diffInDays($end)))
             ->map(fn (int $offset): CarbonImmutable => $start->addDays($offset));
@@ -488,7 +491,7 @@ final readonly class GitHubAppController
             ->whereIn('author_login', $actorLogins)
             ->where('authored_at', '>=', $startUtc)
             ->get(['authored_at'])
-            ->map(fn (GitHubCommit $commit): ?string => $this->localDateString($commit->getRawOriginal('authored_at')))
+            ->map(fn (GitHubCommit $commit): ?string => $this->dateStringInTimezone($commit->getRawOriginal('authored_at'), $displayTimezone))
             ->filter()
             ->countBy();
 
@@ -502,10 +505,11 @@ final readonly class GitHubAppController
                     ->orWhere('merged_at', '>=', $startUtc);
             })
             ->get(['opened_at', 'updated_at_github', 'merged_at'])
-            ->map(fn (GitHubPullRequest $pullRequest): ?string => $this->localDateString(
+            ->map(fn (GitHubPullRequest $pullRequest): ?string => $this->dateStringInTimezone(
                 $pullRequest->getRawOriginal('merged_at')
                     ?? $pullRequest->getRawOriginal('updated_at_github')
                     ?? $pullRequest->getRawOriginal('opened_at'),
+                $displayTimezone,
             ))
             ->filter()
             ->countBy();
@@ -515,7 +519,7 @@ final readonly class GitHubAppController
             ->whereIn('author_login', $actorLogins)
             ->where('submitted_at', '>=', $startUtc)
             ->get(['submitted_at'])
-            ->map(fn (GitHubPullRequestReview $review): ?string => $this->localDateString($review->getRawOriginal('submitted_at')))
+            ->map(fn (GitHubPullRequestReview $review): ?string => $this->dateStringInTimezone($review->getRawOriginal('submitted_at'), $displayTimezone))
             ->filter()
             ->countBy();
 
@@ -537,9 +541,9 @@ final readonly class GitHubAppController
     /**
      * @return list<array{repository: string, total: int}>
      */
-    private function todayActivityByRepository(array $installationIds, array $actorLogins): array
+    private function todayActivityByRepository(array $installationIds, array $actorLogins, string $displayTimezone): array
     {
-        $start = $this->localTodayStart();
+        $start = $this->todayStart($displayTimezone);
         $end = $start->addDay();
         $startUtc = $this->utcBoundary($start);
         $endUtc = $this->utcBoundary($end);
@@ -634,9 +638,20 @@ final readonly class GitHubAppController
         return max(1, $request->integer('activity', 1));
     }
 
-    private function localTodayStart(): CarbonImmutable
+    private function displayTimezone(Request $request): string
     {
-        return CarbonImmutable::now((string) config('app.timezone'))->startOfDay();
+        $timezone = $request->string('timezone')->toString();
+
+        if ($timezone !== '' && in_array($timezone, timezone_identifiers_list(), true)) {
+            return $timezone;
+        }
+
+        return (string) config('app.timezone');
+    }
+
+    private function todayStart(string $timezone): CarbonImmutable
+    {
+        return CarbonImmutable::now($timezone)->startOfDay();
     }
 
     private function utcBoundary(CarbonImmutable $date): CarbonImmutable
@@ -644,14 +659,14 @@ final readonly class GitHubAppController
         return $date->setTimezone('UTC');
     }
 
-    private function localDateString(mixed $value): ?string
+    private function dateStringInTimezone(mixed $value, string $timezone): ?string
     {
         if (! is_string($value) || $value === '') {
             return null;
         }
 
         return CarbonImmutable::parse($value, 'UTC')
-            ->setTimezone((string) config('app.timezone'))
+            ->setTimezone($timezone)
             ->toDateString();
     }
 

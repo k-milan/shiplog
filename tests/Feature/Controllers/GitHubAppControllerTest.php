@@ -6,6 +6,8 @@ use App\Contracts\GitHubAppTokenContract;
 use App\Jobs\BackfillGitHubInstallationJob;
 use App\Jobs\BackfillGitHubRepositoriesJob;
 use App\Models\GitHubAppInstallation;
+use App\Models\GitHubCommit;
+use App\Models\GitHubRepository;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 
@@ -58,6 +60,63 @@ it('shows all connected installations on the settings page', function (): void {
         ->assertInertia(fn ($page) => $page
             ->component('settings/github/index')
             ->has('installations', 2));
+});
+
+it('paginates activity items ten at a time', function (): void {
+    $installation = GitHubAppInstallation::factory()->create([
+        'account_login' => 'octocat',
+    ]);
+    $repository = GitHubRepository::query()->create([
+        'github_app_installation_id' => $installation->id,
+        'github_id' => 1001,
+        'name' => 'demo',
+        'full_name' => 'myorg/demo',
+        'owner_login' => 'myorg',
+        'private' => false,
+        'default_branch' => 'main',
+        'html_url' => 'https://github.com/myorg/demo',
+    ]);
+
+    foreach (range(1, 11) as $index) {
+        GitHubCommit::query()->create([
+            'github_repository_id' => $repository->id,
+            'sha' => sprintf('sha-%02d', $index),
+            'message' => "Commit {$index}",
+            'author_login' => 'octocat',
+            'authored_at' => now()->subMinutes(11 - $index),
+            'html_url' => "https://github.com/myorg/demo/commit/sha-{$index}",
+        ]);
+    }
+
+    $firstPage = $this->get(route('github-apps.index'));
+
+    $firstPage->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('activityItems.data', 10)
+            ->where('activityItems.data.0.title', 'Commit 11')
+            ->where('activityItems.per_page', 10)
+            ->where('activityItems.total', 11));
+
+    $secondPage = $this
+        ->withHeaders([
+            'X-Inertia-Partial-Component' => 'settings/github/index',
+            'X-Inertia-Partial-Data' => 'activityItems',
+        ])
+        ->get(route('github-apps.index', ['activity' => 2]));
+
+    $secondPage->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('activityItems.data', 1)
+            ->where('activityItems.data.0.title', 'Commit 1'));
+
+    $this->flushHeaders();
+
+    $freshPageWithStaleActivityQuery = $this->get(route('github-apps.index', ['activity' => 2]));
+
+    $freshPageWithStaleActivityQuery->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('activityItems.data', 10)
+            ->where('activityItems.data.0.title', 'Commit 11'));
 });
 
 it('redirects to github app installation url', function (): void {
@@ -183,6 +242,122 @@ it('ingests push webhooks', function (): void {
         'sha' => 'pushsha',
         'message' => 'Ship webhook sync',
     ]);
+});
+
+it('shows pull request review requests for connected accounts', function (): void {
+    config(['github.webhook_secret' => 'webhook-secret']);
+
+    GitHubAppInstallation::factory()->create([
+        'installation_id' => 12345678,
+        'account_login' => 'octocat',
+    ]);
+
+    $payload = [
+        'action' => 'review_requested',
+        'installation' => ['id' => 12345678],
+        'requested_reviewer' => [
+            'login' => 'octocat',
+        ],
+        'repository' => [
+            'id' => 987,
+            'name' => 'demo',
+            'full_name' => 'myorg/demo',
+            'owner' => ['login' => 'myorg'],
+            'private' => false,
+            'default_branch' => 'main',
+            'html_url' => 'https://github.com/myorg/demo',
+            'pushed_at' => '2026-05-01T00:00:00Z',
+        ],
+        'pull_request' => [
+            'id' => 555,
+            'number' => 42,
+            'title' => 'Needs another look',
+            'state' => 'open',
+            'draft' => false,
+            'user' => ['login' => 'teammate'],
+            'html_url' => 'https://github.com/myorg/demo/pull/42',
+            'created_at' => '2026-05-14T00:00:00Z',
+            'updated_at' => '2026-05-14T01:00:00Z',
+            'closed_at' => null,
+            'merged_at' => null,
+            'requested_reviewers' => [],
+        ],
+    ];
+    $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+    $response = $this
+        ->withHeaders(githubWebhookHeaders('pull_request', $body))
+        ->postJson(route('github-apps.webhook'), $payload);
+
+    $response->assertOk()
+        ->assertJson(['ok' => true]);
+
+    $this->get(route('github-apps.index'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('pullRequestsToReviewItems', 1)
+            ->where('pullRequestsToReviewItems.0.title', 'Needs another look'));
+});
+
+it('removes pull request review requests after they are removed', function (): void {
+    config(['github.webhook_secret' => 'webhook-secret']);
+
+    GitHubAppInstallation::factory()->create([
+        'installation_id' => 12345678,
+        'account_login' => 'octocat',
+    ]);
+
+    $basePayload = [
+        'installation' => ['id' => 12345678],
+        'requested_reviewer' => [
+            'login' => 'octocat',
+        ],
+        'repository' => [
+            'id' => 987,
+            'name' => 'demo',
+            'full_name' => 'myorg/demo',
+            'owner' => ['login' => 'myorg'],
+            'private' => false,
+            'default_branch' => 'main',
+            'html_url' => 'https://github.com/myorg/demo',
+            'pushed_at' => '2026-05-01T00:00:00Z',
+        ],
+        'pull_request' => [
+            'id' => 555,
+            'number' => 42,
+            'title' => 'Needs another look',
+            'state' => 'open',
+            'draft' => false,
+            'user' => ['login' => 'teammate'],
+            'html_url' => 'https://github.com/myorg/demo/pull/42',
+            'created_at' => '2026-05-14T00:00:00Z',
+            'updated_at' => '2026-05-14T01:00:00Z',
+            'closed_at' => null,
+            'merged_at' => null,
+            'requested_reviewers' => [],
+        ],
+    ];
+
+    $requestedPayload = ['action' => 'review_requested', ...$basePayload];
+    $requestedBody = json_encode($requestedPayload, JSON_THROW_ON_ERROR);
+
+    $this
+        ->withHeaders(githubWebhookHeaders('pull_request', $requestedBody))
+        ->postJson(route('github-apps.webhook'), $requestedPayload)
+        ->assertOk();
+
+    $removedPayload = ['action' => 'review_request_removed', ...$basePayload];
+    $removedBody = json_encode($removedPayload, JSON_THROW_ON_ERROR);
+
+    $this
+        ->withHeaders(githubWebhookHeaders('pull_request', $removedBody))
+        ->postJson(route('github-apps.webhook'), $removedPayload)
+        ->assertOk();
+
+    $this->get(route('github-apps.index'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('pullRequestsToReviewItems', 0));
 });
 
 it('backfills repositories added to a github app installation', function (): void {

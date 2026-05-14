@@ -17,6 +17,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -31,17 +32,29 @@ final readonly class GitHubAppController
         private GitHubAppTokenContract $tokenService,
     ) {}
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
+        $installations = GitHubAppInstallation::query()
+            ->orderBy('account_login')
+            ->get(['id', 'installation_id', 'account_login', 'account_type', 'account_name', 'avatar_url', 'sync_status', 'sync_started_at', 'sync_finished_at', 'sync_error', 'created_at']);
+        $selectedInstallationIds = $this->selectedInstallationIds($request, $installations->pluck('id')->all());
+        $selectedActorLogins = $this->selectedActorLogins($selectedInstallationIds);
+
         return Inertia::render('settings/github/index', [
-            'installations' => GitHubAppInstallation::query()
-                ->orderBy('account_login')
-                ->get(['id', 'installation_id', 'account_login', 'account_type', 'account_name', 'avatar_url', 'sync_status', 'sync_started_at', 'sync_finished_at', 'sync_error', 'created_at']),
-            'last24HoursSummary' => $this->last24HoursSummary(),
-            'last7DaysActivity' => $this->last7DaysActivity(),
-            'activityHeatmap' => $this->activityHeatmap(),
-            'todayActivityByRepository' => $this->todayActivityByRepository(),
-            'activityItems' => Inertia::scroll($this->activityItems()),
+            'installations' => $installations,
+            'selectedInstallationIds' => $selectedInstallationIds,
+            'last24HoursSummary' => $this->last24HoursSummary($selectedInstallationIds, $selectedActorLogins),
+            'pullRequestStatusItems' => $this->pullRequestStatusItems($selectedInstallationIds),
+            'pullRequestsToReviewItems' => $this->pullRequestsToReviewItems($selectedInstallationIds),
+            'last7DaysActivity' => $this->last7DaysActivity($selectedInstallationIds, $selectedActorLogins),
+            'activityHeatmap' => $this->activityHeatmap($selectedInstallationIds, $selectedActorLogins),
+            'todayActivityByRepository' => $this->todayActivityByRepository($selectedInstallationIds, $selectedActorLogins),
+            'activityItems' => Inertia::scroll($this->activityItems(
+                $selectedInstallationIds,
+                $selectedActorLogins,
+                $this->activityPage($request),
+            ))
+                ->append('data', 'id'),
         ]);
     }
 
@@ -138,96 +151,239 @@ final readonly class GitHubAppController
     /**
      * @return LengthAwarePaginator<int, array{id: string, type: string, occurred_at: string|null, title: string, actor: string|null, repository: string|null, reference: string|null, url: string|null, state: string|null}>
      */
-    private function activityItems(): LengthAwarePaginator
+    private function activityItems(array $installationIds, array $actorLogins, int $page): LengthAwarePaginator
     {
-        $since = CarbonImmutable::now()->subDay();
         $pageName = 'activity';
-        $perPage = 12;
-        $page = LengthAwarePaginator::resolveCurrentPage($pageName);
+        $perPage = 10;
 
-        $commits = GitHubCommit::query()
-            ->with('repository:id,full_name')
-            ->where('authored_at', '>=', $since)
-            ->get(['id', 'github_repository_id', 'sha', 'message', 'author_login', 'author_name', 'authored_at', 'html_url'])
-            ->map(fn (GitHubCommit $commit): array => [
-                'id' => "commit-{$commit->id}",
-                'type' => 'commit',
-                'occurred_at' => $commit->authored_at?->toJSON(),
-                'title' => Str::of($commit->message ?? 'Commit')->before("\n")->toString(),
-                'actor' => $commit->author_login ?? $commit->author_name,
-                'repository' => $commit->repository?->full_name,
-                'reference' => Str::of($commit->sha)->limit(7, '')->toString(),
-                'url' => $commit->html_url,
-                'state' => null,
+        $commits = DB::table('github_commits as commits')
+            ->join('github_repositories as repositories', 'repositories.id', '=', 'commits.github_repository_id')
+            ->whereIn('repositories.github_app_installation_id', $installationIds)
+            ->whereIn('commits.author_login', $actorLogins)
+            ->select([
+                'commits.id as source_id',
+                DB::raw("'commit' as type"),
+                'commits.authored_at as occurred_at',
+                'commits.message as title',
+                DB::raw('coalesce(commits.author_login, commits.author_name) as actor'),
+                'repositories.full_name as repository',
+                'commits.sha as reference',
+                'commits.html_url as url',
+                DB::raw('null as state'),
             ]);
 
-        $pullRequests = GitHubPullRequest::query()
-            ->with('repository:id,full_name')
-            ->where(function ($query) use ($since): void {
+        $pullRequests = DB::table('github_pull_requests as pull_requests')
+            ->join('github_repositories as repositories', 'repositories.id', '=', 'pull_requests.github_repository_id')
+            ->whereIn('repositories.github_app_installation_id', $installationIds)
+            ->whereIn('pull_requests.author_login', $actorLogins)
+            ->select([
+                'pull_requests.id as source_id',
+                DB::raw("'pull_request' as type"),
+                DB::raw('coalesce(pull_requests.merged_at, pull_requests.updated_at_github, pull_requests.opened_at) as occurred_at'),
+                'pull_requests.title as title',
+                'pull_requests.author_login as actor',
+                'repositories.full_name as repository',
+                DB::raw("('#' || pull_requests.number) as reference"),
+                'pull_requests.html_url as url',
+                DB::raw("case when pull_requests.merged_at is not null then 'merged' else pull_requests.state end as state"),
+            ]);
+
+        $reviews = DB::table('github_pull_request_reviews as reviews')
+            ->join('github_pull_requests as pull_requests', 'pull_requests.id', '=', 'reviews.github_pull_request_id')
+            ->join('github_repositories as repositories', 'repositories.id', '=', 'pull_requests.github_repository_id')
+            ->whereIn('repositories.github_app_installation_id', $installationIds)
+            ->whereIn('reviews.author_login', $actorLogins)
+            ->select([
+                'reviews.id as source_id',
+                DB::raw("'review' as type"),
+                'reviews.submitted_at as occurred_at',
+                'pull_requests.title as title',
+                'reviews.author_login as actor',
+                'repositories.full_name as repository',
+                DB::raw("('#' || pull_requests.number) as reference"),
+                'reviews.html_url as url',
+                'reviews.state as state',
+            ]);
+
+        $feed = $commits
+            ->unionAll($pullRequests)
+            ->unionAll($reviews);
+
+        return DB::query()
+            ->fromSub($feed, 'activity')
+            ->whereNotNull('occurred_at')
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('source_id')
+            ->paginate($perPage, ['*'], $pageName, $page)
+            ->through(fn (object $item): array => [
+                'id' => "{$item->type}-{$item->source_id}",
+                'type' => $item->type,
+                'occurred_at' => $this->timestampJson($item->occurred_at),
+                'title' => $item->type === 'commit'
+                    ? Str::of($item->title ?? 'Commit')->before("\n")->toString()
+                    : ($item->title ?? 'Pull request review'),
+                'actor' => $item->actor,
+                'repository' => $item->repository,
+                'reference' => $item->type === 'commit'
+                    ? Str::of((string) $item->reference)->limit(7, '')->toString()
+                    : $item->reference,
+                'url' => $item->url,
+                'state' => $item->state,
+            ]);
+    }
+
+    /**
+     * @return list<array{id: int, title: string, repository: string|null, number: int, status: string, url: string, updated_at: string|null, merged_at: string|null}>
+     */
+    private function pullRequestStatusItems(array $installationIds): array
+    {
+        $today = $this->localTodayStart();
+        $tomorrow = $today->addDay();
+        $authorLogins = GitHubAppInstallation::query()
+            ->whereIn('id', $installationIds)
+            ->pluck('account_login')
+            ->all();
+
+        if ($authorLogins === []) {
+            return [];
+        }
+
+        return GitHubPullRequest::query()
+            ->with([
+                'repository:id,full_name',
+                'reviews:id,github_pull_request_id,state,submitted_at',
+            ])
+            ->whereIn('author_login', $authorLogins)
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->where(function ($query) use ($today, $tomorrow): void {
                 $query
-                    ->where('updated_at_github', '>=', $since)
-                    ->orWhere('opened_at', '>=', $since)
-                    ->orWhere('merged_at', '>=', $since);
+                    ->where('draft', true)
+                    ->orWhere(function ($query): void {
+                        $query
+                            ->where('state', 'open')
+                            ->where('draft', false);
+                    })
+                    ->orWhere(function ($query) use ($today, $tomorrow): void {
+                        $query
+                            ->where('merged_at', '>=', $this->utcBoundary($today))
+                            ->where('merged_at', '<', $this->utcBoundary($tomorrow));
+                    });
             })
-            ->get(['id', 'github_repository_id', 'number', 'title', 'state', 'author_login', 'html_url', 'opened_at', 'updated_at_github', 'merged_at'])
+            ->orderByRaw('merged_at is null desc')
+            ->orderByDesc(DB::raw('coalesce(merged_at, updated_at_github, opened_at)'))
+            ->limit(12)
+            ->get(['id', 'github_repository_id', 'number', 'title', 'state', 'draft', 'html_url', 'updated_at_github', 'merged_at'])
             ->map(fn (GitHubPullRequest $pullRequest): array => [
-                'id' => "pull-request-{$pullRequest->id}",
-                'type' => 'pull_request',
-                'occurred_at' => ($pullRequest->merged_at ?? $pullRequest->updated_at_github ?? $pullRequest->opened_at)?->toJSON(),
+                'id' => $pullRequest->id,
                 'title' => $pullRequest->title,
-                'actor' => $pullRequest->author_login,
                 'repository' => $pullRequest->repository?->full_name,
-                'reference' => "#{$pullRequest->number}",
+                'number' => $pullRequest->number,
+                'status' => $this->pullRequestDisplayStatus($pullRequest),
                 'url' => $pullRequest->html_url,
-                'state' => $pullRequest->merged_at ? 'merged' : $pullRequest->state,
-            ]);
+                'updated_at' => $this->timestampJson($pullRequest->getRawOriginal('updated_at_github')),
+                'merged_at' => $this->timestampJson($pullRequest->getRawOriginal('merged_at')),
+            ])
+            ->all();
+    }
 
-        $reviews = GitHubPullRequestReview::query()
-            ->with('pullRequest.repository:id,full_name')
-            ->where('submitted_at', '>=', $since)
-            ->get(['id', 'github_pull_request_id', 'state', 'author_login', 'html_url', 'submitted_at'])
-            ->map(fn (GitHubPullRequestReview $review): array => [
-                'id' => "review-{$review->id}",
-                'type' => 'review',
-                'occurred_at' => $review->submitted_at?->toJSON(),
-                'title' => $review->pullRequest?->title ?? 'Pull request review',
-                'actor' => $review->author_login,
-                'repository' => $review->pullRequest?->repository?->full_name,
-                'reference' => $review->pullRequest ? "#{$review->pullRequest->number}" : null,
-                'url' => $review->html_url,
-                'state' => $review->state,
-            ]);
+    private function pullRequestDisplayStatus(GitHubPullRequest $pullRequest): string
+    {
+        if ($pullRequest->merged_at !== null) {
+            return 'merged today';
+        }
 
-        $items = $commits
-            ->concat($pullRequests)
-            ->concat($reviews)
-            ->sortByDesc('occurred_at')
-            ->values();
+        if ($pullRequest->state === 'closed') {
+            return 'closed';
+        }
 
-        return new LengthAwarePaginator(
-            $items->forPage($page, $perPage)->values(),
-            $items->count(),
-            $perPage,
-            $page,
-            [
-                'path' => request()->url(),
-                'pageName' => $pageName,
-            ],
-        );
+        if ($pullRequest->draft) {
+            return 'draft';
+        }
+
+        $latestReviewState = $pullRequest->reviews
+            ->sortByDesc(fn (GitHubPullRequestReview $review): mixed => $review->submitted_at)
+            ->first()?->state;
+
+        return match ($latestReviewState) {
+            'APPROVED' => 'approved',
+            'CHANGES_REQUESTED' => 'changes requested',
+            'COMMENTED' => 'commented',
+            default => 'open',
+        };
+    }
+
+    /**
+     * @return list<array{id: int, title: string, repository: string|null, number: int, url: string, author: string|null, updated_at: string|null}>
+     */
+    private function pullRequestsToReviewItems(array $installationIds): array
+    {
+        $reviewerLogins = GitHubAppInstallation::query()
+            ->whereIn('id', $installationIds)
+            ->pluck('account_login')
+            ->all();
+
+        if ($reviewerLogins === []) {
+            return [];
+        }
+
+        return GitHubPullRequest::query()
+            ->with('repository:id,full_name')
+            ->where('state', 'open')
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->orderByDesc(DB::raw('coalesce(updated_at_github, opened_at)'))
+            ->get(['id', 'github_repository_id', 'number', 'title', 'author_login', 'html_url', 'updated_at_github', 'opened_at', 'payload'])
+            ->filter(fn (GitHubPullRequest $pullRequest): bool => $this->pullRequestRequestsReviewFrom($pullRequest, $reviewerLogins))
+            ->take(12)
+            ->map(fn (GitHubPullRequest $pullRequest): array => [
+                'id' => $pullRequest->id,
+                'title' => $pullRequest->title,
+                'repository' => $pullRequest->repository?->full_name,
+                'number' => $pullRequest->number,
+                'url' => $pullRequest->html_url,
+                'author' => $pullRequest->author_login,
+                'updated_at' => $this->timestampJson(
+                    $pullRequest->getRawOriginal('updated_at_github') ?? $pullRequest->getRawOriginal('opened_at'),
+                ),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  list<string>  $reviewerLogins
+     */
+    private function pullRequestRequestsReviewFrom(GitHubPullRequest $pullRequest, array $reviewerLogins): bool
+    {
+        $payload = is_array($pullRequest->payload) ? $pullRequest->payload : [];
+        $requestedReviewers = is_array($payload['requested_reviewers'] ?? null)
+            ? $payload['requested_reviewers']
+            : [];
+
+        foreach ($requestedReviewers as $reviewer) {
+            if (is_array($reviewer) && in_array($reviewer['login'] ?? null, $reviewerLogins, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
      * @return array{activities: int, repos_touched: int, prs_updated: int, prs_merged: int, production_deploys: int|null}
      */
-    private function last24HoursSummary(): array
+    private function last24HoursSummary(array $installationIds, array $actorLogins): array
     {
-        $since = CarbonImmutable::now()->subDay();
+        $since = CarbonImmutable::now('UTC')->subDay();
 
         $commitRepositoryIds = GitHubCommit::query()
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
             ->where('authored_at', '>=', $since)
             ->pluck('github_repository_id');
 
         $pullRequests = GitHubPullRequest::query()
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
             ->where(function ($query) use ($since): void {
                 $query
                     ->where('updated_at_github', '>=', $since)
@@ -238,6 +394,8 @@ final readonly class GitHubAppController
 
         $reviews = GitHubPullRequestReview::query()
             ->with('pullRequest:id,github_repository_id')
+            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
             ->where('submitted_at', '>=', $since)
             ->get(['id', 'github_pull_request_id']);
 
@@ -261,35 +419,46 @@ final readonly class GitHubAppController
     /**
      * @return list<array{date: string, label: string, total: int}>
      */
-    private function last7DaysActivity(): array
+    private function last7DaysActivity(array $installationIds, array $actorLogins): array
     {
-        $start = CarbonImmutable::now()->startOfDay()->subDays(6);
+        $start = $this->localTodayStart()->subDays(6);
+        $startUtc = $this->utcBoundary($start);
         $days = collect(range(0, 6))
             ->map(fn (int $offset): CarbonImmutable => $start->addDays($offset));
 
         $commits = GitHubCommit::query()
-            ->where('authored_at', '>=', $start)
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('authored_at', '>=', $startUtc)
             ->get(['authored_at'])
-            ->map(fn (GitHubCommit $commit): ?string => $commit->authored_at?->toDateString())
+            ->map(fn (GitHubCommit $commit): ?string => $this->localDateString($commit->getRawOriginal('authored_at')))
             ->filter()
             ->countBy();
 
         $pullRequests = GitHubPullRequest::query()
-            ->where(function ($query) use ($start): void {
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where(function ($query) use ($startUtc): void {
                 $query
-                    ->where('updated_at_github', '>=', $start)
-                    ->orWhere('opened_at', '>=', $start)
-                    ->orWhere('merged_at', '>=', $start);
+                    ->where('updated_at_github', '>=', $startUtc)
+                    ->orWhere('opened_at', '>=', $startUtc)
+                    ->orWhere('merged_at', '>=', $startUtc);
             })
             ->get(['opened_at', 'updated_at_github', 'merged_at'])
-            ->map(fn (GitHubPullRequest $pullRequest): ?string => ($pullRequest->merged_at ?? $pullRequest->updated_at_github ?? $pullRequest->opened_at)?->toDateString())
+            ->map(fn (GitHubPullRequest $pullRequest): ?string => $this->localDateString(
+                $pullRequest->getRawOriginal('merged_at')
+                    ?? $pullRequest->getRawOriginal('updated_at_github')
+                    ?? $pullRequest->getRawOriginal('opened_at'),
+            ))
             ->filter()
             ->countBy();
 
         $reviews = GitHubPullRequestReview::query()
-            ->where('submitted_at', '>=', $start)
+            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('submitted_at', '>=', $startUtc)
             ->get(['submitted_at'])
-            ->map(fn (GitHubPullRequestReview $review): ?string => $review->submitted_at?->toDateString())
+            ->map(fn (GitHubPullRequestReview $review): ?string => $this->localDateString($review->getRawOriginal('submitted_at')))
             ->filter()
             ->countBy();
 
@@ -306,36 +475,47 @@ final readonly class GitHubAppController
     /**
      * @return array{start_date: string, end_date: string, total: int, data: list<array{date: string, value: int}>}
      */
-    private function activityHeatmap(): array
+    private function activityHeatmap(array $installationIds, array $actorLogins): array
     {
-        $start = CarbonImmutable::now()->startOfDay()->subDays(83);
-        $end = CarbonImmutable::now()->startOfDay();
+        $start = $this->localTodayStart()->subMonths(6)->addDay();
+        $end = $this->localTodayStart();
+        $startUtc = $this->utcBoundary($start);
         $days = collect(range(0, $start->diffInDays($end)))
             ->map(fn (int $offset): CarbonImmutable => $start->addDays($offset));
 
         $commits = GitHubCommit::query()
-            ->where('authored_at', '>=', $start)
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('authored_at', '>=', $startUtc)
             ->get(['authored_at'])
-            ->map(fn (GitHubCommit $commit): ?string => $commit->authored_at?->toDateString())
+            ->map(fn (GitHubCommit $commit): ?string => $this->localDateString($commit->getRawOriginal('authored_at')))
             ->filter()
             ->countBy();
 
         $pullRequests = GitHubPullRequest::query()
-            ->where(function ($query) use ($start): void {
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where(function ($query) use ($startUtc): void {
                 $query
-                    ->where('updated_at_github', '>=', $start)
-                    ->orWhere('opened_at', '>=', $start)
-                    ->orWhere('merged_at', '>=', $start);
+                    ->where('updated_at_github', '>=', $startUtc)
+                    ->orWhere('opened_at', '>=', $startUtc)
+                    ->orWhere('merged_at', '>=', $startUtc);
             })
             ->get(['opened_at', 'updated_at_github', 'merged_at'])
-            ->map(fn (GitHubPullRequest $pullRequest): ?string => ($pullRequest->merged_at ?? $pullRequest->updated_at_github ?? $pullRequest->opened_at)?->toDateString())
+            ->map(fn (GitHubPullRequest $pullRequest): ?string => $this->localDateString(
+                $pullRequest->getRawOriginal('merged_at')
+                    ?? $pullRequest->getRawOriginal('updated_at_github')
+                    ?? $pullRequest->getRawOriginal('opened_at'),
+            ))
             ->filter()
             ->countBy();
 
         $reviews = GitHubPullRequestReview::query()
-            ->where('submitted_at', '>=', $start)
+            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('submitted_at', '>=', $startUtc)
             ->get(['submitted_at'])
-            ->map(fn (GitHubPullRequestReview $review): ?string => $review->submitted_at?->toDateString())
+            ->map(fn (GitHubPullRequestReview $review): ?string => $this->localDateString($review->getRawOriginal('submitted_at')))
             ->filter()
             ->countBy();
 
@@ -357,26 +537,32 @@ final readonly class GitHubAppController
     /**
      * @return list<array{repository: string, total: int}>
      */
-    private function todayActivityByRepository(): array
+    private function todayActivityByRepository(array $installationIds, array $actorLogins): array
     {
-        $start = CarbonImmutable::now()->startOfDay();
+        $start = $this->localTodayStart();
         $end = $start->addDay();
+        $startUtc = $this->utcBoundary($start);
+        $endUtc = $this->utcBoundary($end);
 
         $commits = GitHubCommit::query()
             ->with('repository:id,full_name')
-            ->where('authored_at', '>=', $start)
-            ->where('authored_at', '<', $end)
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('authored_at', '>=', $startUtc)
+            ->where('authored_at', '<', $endUtc)
             ->get(['id', 'github_repository_id', 'authored_at'])
             ->map(fn (GitHubCommit $commit): ?string => $commit->repository?->full_name)
             ->filter();
 
         $pullRequests = GitHubPullRequest::query()
             ->with('repository:id,full_name')
-            ->where(function ($query) use ($start, $end): void {
+            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where(function ($query) use ($startUtc, $endUtc): void {
                 $query
-                    ->whereBetween('updated_at_github', [$start, $end])
-                    ->orWhereBetween('opened_at', [$start, $end])
-                    ->orWhereBetween('merged_at', [$start, $end]);
+                    ->whereBetween('updated_at_github', [$startUtc, $endUtc])
+                    ->orWhereBetween('opened_at', [$startUtc, $endUtc])
+                    ->orWhereBetween('merged_at', [$startUtc, $endUtc]);
             })
             ->get(['id', 'github_repository_id', 'opened_at', 'updated_at_github', 'merged_at'])
             ->map(fn (GitHubPullRequest $pullRequest): ?string => $pullRequest->repository?->full_name)
@@ -384,8 +570,10 @@ final readonly class GitHubAppController
 
         $reviews = GitHubPullRequestReview::query()
             ->with('pullRequest.repository:id,full_name')
-            ->where('submitted_at', '>=', $start)
-            ->where('submitted_at', '<', $end)
+            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
+            ->whereIn('author_login', $actorLogins)
+            ->where('submitted_at', '>=', $startUtc)
+            ->where('submitted_at', '<', $endUtc)
             ->get(['id', 'github_pull_request_id', 'submitted_at'])
             ->map(fn (GitHubPullRequestReview $review): ?string => $review->pullRequest?->repository?->full_name)
             ->filter();
@@ -401,5 +589,78 @@ final readonly class GitHubAppController
             ->sortByDesc('total')
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  list<int>  $availableInstallationIds
+     * @return list<int>
+     */
+    private function selectedInstallationIds(Request $request, array $availableInstallationIds): array
+    {
+        if (! $request->has('selected_installations') && ! $request->boolean('account_filter')) {
+            return $availableInstallationIds;
+        }
+
+        return collect((array) $request->input('selected_installations', []))
+            ->map(fn (mixed $id): int => (int) $id)
+            ->intersect($availableInstallationIds)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  list<int>  $installationIds
+     * @return list<string>
+     */
+    private function selectedActorLogins(array $installationIds): array
+    {
+        return GitHubAppInstallation::query()
+            ->whereIn('id', $installationIds)
+            ->pluck('account_login')
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function activityPage(Request $request): int
+    {
+        $partialData = collect(explode(',', (string) $request->header('X-Inertia-Partial-Data')))
+            ->map(fn (string $prop): string => mb_trim($prop));
+
+        if (! $partialData->contains('activityItems')) {
+            return 1;
+        }
+
+        return max(1, $request->integer('activity', 1));
+    }
+
+    private function localTodayStart(): CarbonImmutable
+    {
+        return CarbonImmutable::now((string) config('app.timezone'))->startOfDay();
+    }
+
+    private function utcBoundary(CarbonImmutable $date): CarbonImmutable
+    {
+        return $date->setTimezone('UTC');
+    }
+
+    private function localDateString(mixed $value): ?string
+    {
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        return CarbonImmutable::parse($value, 'UTC')
+            ->setTimezone((string) config('app.timezone'))
+            ->toDateString();
+    }
+
+    private function timestampJson(mixed $value): ?string
+    {
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        return CarbonImmutable::parse($value, 'UTC')->toJSON();
     }
 }

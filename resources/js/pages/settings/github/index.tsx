@@ -2,6 +2,16 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChartContainer } from '@/components/ui/chart';
+import { Checkbox } from '@/components/ui/checkbox';
+import AppearanceToggleTab from '@/components/appearance-tabs';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from '@/components/ui/dialog';
 import { Heatmap } from '@/components/ui/heatmap';
 import {
     PartitionBar,
@@ -10,17 +20,40 @@ import {
     PartitionBarSegmentValue,
 } from '@/components/ui/partition-bar';
 import { ScrollFade } from '@/components/ui/scroll-fade';
-import { destroy, redirect } from '@/routes/github-apps';
-import { Form, Head, InfiniteScroll, usePoll } from '@inertiajs/react';
 import {
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+    Tooltip as UiTooltip,
+} from '@/components/ui/tooltip';
+import { destroy, redirect } from '@/routes/github-apps';
+import {
+    Form,
+    Head,
+    InfiniteScroll,
+    router,
+    usePage,
+    usePoll,
+} from '@inertiajs/react';
+import {
+    Check,
+    GitMerge,
     GitBranch,
     GitCommitHorizontal,
     GitPullRequest,
     MessageSquareText,
     Plus,
     Trash2,
+    X,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    memo,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
+} from 'react';
 import {
     Area,
     AreaChart,
@@ -73,6 +106,34 @@ interface RepositoryActivityPartition {
     total: number;
 }
 
+interface PullRequestStatusItem {
+    id: number;
+    title: string;
+    repository: string | null;
+    number: number;
+    status:
+        | 'draft'
+        | 'open'
+        | 'approved'
+        | 'changes requested'
+        | 'commented'
+        | 'merged today'
+        | 'closed'
+        | string;
+    url: string;
+    updated_at: string | null;
+    merged_at: string | null;
+}
+
+interface PullRequestToReviewItem {
+    id: number;
+    title: string;
+    repository: string | null;
+    url: string;
+    author: string | null;
+    updated_at: string | null;
+}
+
 interface ActivityItem {
     id: string;
     type: 'commit' | 'pull_request' | 'review';
@@ -85,13 +146,146 @@ interface ActivityItem {
     state: string | null;
 }
 
+type AccentColor =
+    | 'blue'
+    | 'pink'
+    | 'green'
+    | 'red'
+    | 'yellow'
+    | 'orange'
+    | 'brown'
+    | 'purple';
+
+const accentPresets: Record<
+    AccentColor,
+    {
+        label: string;
+        color: string;
+        soft: string;
+        border: string;
+        shadow: string;
+        scale: string[];
+    }
+> = {
+    blue: {
+        label: 'Blue',
+        color: 'oklch(68.5% 0.169 237.323)',
+        soft: 'oklch(68.5% 0.169 237.323 / 0.1)',
+        border: 'oklch(68.5% 0.169 237.323 / 0.3)',
+        shadow: 'oklch(68.5% 0.169 237.323 / 0.35)',
+        scale: [
+            'oklch(50% 0.134 242.749)',
+            'oklch(58.8% 0.158 241.966)',
+            'oklch(68.5% 0.169 237.323)',
+            'oklch(82.8% 0.111 230.318)',
+        ],
+    },
+    pink: {
+        label: 'Pink',
+        color: 'oklch(65.6% 0.241 354.308)',
+        soft: 'oklch(65.6% 0.241 354.308 / 0.1)',
+        border: 'oklch(65.6% 0.241 354.308 / 0.3)',
+        shadow: 'oklch(65.6% 0.241 354.308 / 0.35)',
+        scale: [
+            'oklch(52.5% 0.223 3.958)',
+            'oklch(59.2% 0.249 0.584)',
+            'oklch(65.6% 0.241 354.308)',
+            'oklch(82.3% 0.12 346.018)',
+        ],
+    },
+    green: {
+        label: 'Green',
+        color: 'oklch(72.3% 0.219 149.579)',
+        soft: 'oklch(72.3% 0.219 149.579 / 0.1)',
+        border: 'oklch(72.3% 0.219 149.579 / 0.3)',
+        shadow: 'oklch(72.3% 0.219 149.579 / 0.35)',
+        scale: [
+            'oklch(44.8% 0.119 151.328)',
+            'oklch(62.7% 0.194 149.214)',
+            'oklch(72.3% 0.219 149.579)',
+            'oklch(87.1% 0.15 154.449)',
+        ],
+    },
+    red: {
+        label: 'Red',
+        color: 'oklch(63.7% 0.237 25.331)',
+        soft: 'oklch(63.7% 0.237 25.331 / 0.1)',
+        border: 'oklch(63.7% 0.237 25.331 / 0.3)',
+        shadow: 'oklch(63.7% 0.237 25.331 / 0.35)',
+        scale: [
+            'oklch(50.5% 0.213 27.518)',
+            'oklch(57.7% 0.245 27.325)',
+            'oklch(63.7% 0.237 25.331)',
+            'oklch(80.8% 0.114 19.571)',
+        ],
+    },
+    yellow: {
+        label: 'Yellow',
+        color: 'oklch(85.2% 0.199 91.936)',
+        soft: 'oklch(85.2% 0.199 91.936 / 0.1)',
+        border: 'oklch(85.2% 0.199 91.936 / 0.3)',
+        shadow: 'oklch(85.2% 0.199 91.936 / 0.35)',
+        scale: [
+            'oklch(68.1% 0.162 75.834)',
+            'oklch(79.5% 0.184 86.047)',
+            'oklch(85.2% 0.199 91.936)',
+            'oklch(90.5% 0.182 98.111)',
+        ],
+    },
+    orange: {
+        label: 'Orange',
+        color: 'oklch(70.5% 0.213 47.604)',
+        soft: 'oklch(70.5% 0.213 47.604 / 0.1)',
+        border: 'oklch(70.5% 0.213 47.604 / 0.3)',
+        shadow: 'oklch(70.5% 0.213 47.604 / 0.35)',
+        scale: [
+            'oklch(55.3% 0.195 38.402)',
+            'oklch(64.6% 0.222 41.116)',
+            'oklch(70.5% 0.213 47.604)',
+            'oklch(83.7% 0.128 66.29)',
+        ],
+    },
+    brown: {
+        label: 'Brown',
+        color: 'oklch(55.3% 0.135 58.071)',
+        soft: 'oklch(55.3% 0.135 58.071 / 0.1)',
+        border: 'oklch(55.3% 0.135 58.071 / 0.3)',
+        shadow: 'oklch(55.3% 0.135 58.071 / 0.35)',
+        scale: [
+            'oklch(41.2% 0.098 59.32)',
+            'oklch(48.9% 0.118 58.812)',
+            'oklch(55.3% 0.135 58.071)',
+            'oklch(73.1% 0.093 60.61)',
+        ],
+    },
+    purple: {
+        label: 'Purple',
+        color: 'oklch(62.7% 0.265 303.9)',
+        soft: 'oklch(62.7% 0.265 303.9 / 0.1)',
+        border: 'oklch(62.7% 0.265 303.9 / 0.3)',
+        shadow: 'oklch(62.7% 0.265 303.9 / 0.35)',
+        scale: [
+            'oklch(49.6% 0.265 301.924)',
+            'oklch(55.8% 0.288 302.321)',
+            'oklch(62.7% 0.265 303.9)',
+            'oklch(82.7% 0.119 306.383)',
+        ],
+    },
+};
+
 interface Paginated<T> {
     data: T[];
+    current_page?: number;
+    per_page?: number;
+    total?: number;
 }
 
-interface Props {
+interface Props extends Record<string, unknown> {
     installations: GitHubInstallation[];
+    selectedInstallationIds: number[];
     last24HoursSummary: Last24HoursSummary;
+    pullRequestStatusItems: PullRequestStatusItem[];
+    pullRequestsToReviewItems: PullRequestToReviewItem[];
     last7DaysActivity: ActivityChartPoint[];
     activityHeatmap: ActivityHeatmap;
     todayActivityByRepository: RepositoryActivityPartition[];
@@ -101,6 +295,7 @@ interface Props {
 
 export default function GitHubIndex({
     installations = [],
+    selectedInstallationIds: initialSelectedInstallationIds = [],
     last24HoursSummary = {
         activities: 0,
         repos_touched: 0,
@@ -108,6 +303,8 @@ export default function GitHubIndex({
         prs_merged: 0,
         production_deploys: null,
     },
+    pullRequestStatusItems = [],
+    pullRequestsToReviewItems = [],
     last7DaysActivity = [],
     activityHeatmap = {
         start_date: new Date().toISOString().slice(0, 10),
@@ -116,18 +313,23 @@ export default function GitHubIndex({
         data: [],
     },
     todayActivityByRepository = [],
-    activityItems = { data: [] },
     status,
 }: Props) {
-    const previousActivityIds = useRef<string[] | null>(null);
-    const animationTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [newActivityItemIds, setNewActivityItemIds] = useState<Set<string>>(
-        () => new Set(),
-    );
-    const activityItemsData = useMemo(
-        () => activityItems.data ?? [],
-        [activityItems.data],
-    );
+    const [selectedInstallationIds, setSelectedInstallationIds] = useState<
+        number[]
+    >(() => initialSelectedInstallationIds);
+    const [accentColor, setAccentColor] = useState<AccentColor>(() => {
+        if (typeof window === 'undefined') {
+            return 'blue';
+        }
+
+        const saved = window.localStorage.getItem('shiplog-accent');
+
+        return saved !== null && saved in accentPresets
+            ? (saved as AccentColor)
+            : 'blue';
+    });
+    const accent = accentPresets[accentColor];
     const hasSyncInProgress = installations.some((installation) =>
         ['pending', 'syncing'].includes(installation.sync_status),
     );
@@ -138,77 +340,55 @@ export default function GitHubIndex({
     usePoll(10000, {
         only: [
             'installations',
-            'activityItems',
             'last24HoursSummary',
+            'pullRequestStatusItems',
+            'pullRequestsToReviewItems',
             'last7DaysActivity',
             'activityHeatmap',
             'todayActivityByRepository',
         ],
-        reset: ['activityItems'],
-        data: { activity: 1 },
+        data: {
+            account_filter: 1,
+            selected_installations: selectedInstallationIds,
+        },
     });
 
     useEffect(() => {
-        const currentIds = activityItemsData.map((item) => item.id);
-        const previousIds = previousActivityIds.current;
+        setSelectedInstallationIds(initialSelectedInstallationIds);
+    }, [initialSelectedInstallationIds]);
 
-        if (previousIds === null) {
-            previousActivityIds.current = currentIds;
-
-            return;
-        }
-
-        const previousFirstId = previousIds[0];
-        const previousFirstIndex = previousFirstId
-            ? currentIds.indexOf(previousFirstId)
-            : -1;
-        const incomingIds =
-            previousFirstIndex > 0
-                ? currentIds.slice(0, previousFirstIndex)
-                : currentIds.filter((id) => !previousIds.includes(id));
-
-        if (incomingIds.length > 0) {
-            setNewActivityItemIds(new Set(incomingIds));
-
-            if (animationTimeout.current !== null) {
-                clearTimeout(animationTimeout.current);
-            }
-
-            animationTimeout.current = setTimeout(() => {
-                setNewActivityItemIds(new Set());
-                animationTimeout.current = null;
-            }, 1200);
-        }
-
-        previousActivityIds.current = currentIds;
-    }, [activityItemsData]);
+    const updateAccentColor = (color: AccentColor) => {
+        setAccentColor(color);
+        window.localStorage.setItem('shiplog-accent', color);
+    };
 
     return (
-        <main className="min-h-screen bg-background [background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,#ffffff_8%,transparent)_0.75px,transparent_0)] [background-size:13px_13px] text-foreground">
+        <main
+            className="min-h-screen bg-background [background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,#000000_11%,transparent)_0.75px,transparent_0)] [background-size:13px_13px] text-foreground dark:[background-image:radial-gradient(circle_at_1px_1px,color-mix(in_oklch,#ffffff_8%,transparent)_0.75px,transparent_0)]"
+            style={
+                {
+                    '--shiplog-accent': accent.color,
+                    '--shiplog-accent-soft': accent.soft,
+                    '--shiplog-accent-border': accent.border,
+                    '--shiplog-accent-shadow': accent.shadow,
+                    '--shiplog-accent-1': accent.scale[0],
+                    '--shiplog-accent-2': accent.scale[1],
+                    '--shiplog-accent-3': accent.scale[2],
+                    '--shiplog-accent-4': accent.scale[3],
+                } as React.CSSProperties
+            }
+        >
             <Head title="Shiplog" />
 
-            <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-10 sm:px-6">
-                <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                            <GitBranch className="h-5 w-5" />
-                            <h1 className="font-mono text-2xl font-semibold">
-                                Shiplog
-                            </h1>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                            Recent GitHub commits, pull requests, and reviews.
-                        </p>
-                    </div>
+            <TopNav
+                installations={installations}
+                selectedInstallationIds={selectedInstallationIds}
+                onSelectedInstallationIdsChange={setSelectedInstallationIds}
+                accentColor={accentColor}
+                onAccentColorChange={updateAccentColor}
+            />
 
-                    <Button asChild size="sm">
-                        <a href={redirect.url()}>
-                            <Plus className="h-4 w-4" />
-                            Connect GitHub
-                        </a>
-                    </Button>
-                </header>
-
+            <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 pt-24 pb-10 sm:px-6">
                 <div className="space-y-6">
                     {status === 'github-app-connected' && (
                         <StatusMessage variant="success">
@@ -233,8 +413,6 @@ export default function GitHubIndex({
                         <EmptyState />
                     ) : (
                         <>
-                            <ConnectedAccounts installations={installations} />
-
                             {hasSyncInProgress && (
                                 <StatusMessage>
                                     GitHub sync is running. Keep the queue worker
@@ -258,38 +436,248 @@ export default function GitHubIndex({
 
                             <Last24HoursSummaryCards
                                 summary={last24HoursSummary}
-                            />
-
-                            <TodayRepositoryPartition
                                 repositories={todayActivityByRepository}
                             />
 
-                            <div className="grid items-start gap-6 lg:grid-cols-2">
-                                <div className="space-y-6">
-                                    <Last7DaysActivityChart
-                                        data={last7DaysActivity}
-                                    />
+                            <ActivityDashboardGrid
+                                selectedInstallationIds={selectedInstallationIds}
+                                pullRequests={pullRequestStatusItems}
+                                reviewRequests={pullRequestsToReviewItems}
+                            />
 
-                                    <ActivityHeatmapPanel
-                                        heatmap={activityHeatmap}
-                                    />
-                                </div>
-
-                                <section className="min-w-0 lg:sticky lg:top-6">
-                                    <h2 className="mb-3 font-mono text-sm font-semibold">
-                                        Last 24 Hours
-                                    </h2>
-                                    <ActivityTimeline
-                                        items={activityItemsData}
-                                        newItemIds={newActivityItemIds}
-                                    />
-                                </section>
-                            </div>
+                            <ActivityChartsGrid
+                                last7DaysActivity={last7DaysActivity}
+                                activityHeatmap={activityHeatmap}
+                            />
                         </>
                     )}
                 </div>
             </div>
         </main>
+    );
+}
+
+function TopNav({
+    installations,
+    selectedInstallationIds,
+    onSelectedInstallationIdsChange,
+    accentColor,
+    onAccentColorChange,
+}: {
+    installations: GitHubInstallation[];
+    selectedInstallationIds: number[];
+    onSelectedInstallationIdsChange: (installationIds: number[]) => void;
+    accentColor: AccentColor;
+    onAccentColorChange: (color: AccentColor) => void;
+}) {
+    return (
+        <div className="sticky top-0 z-40">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background via-background/80 to-transparent" />
+            <nav className="relative mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
+                <a
+                    href="/"
+                    className="flex items-center gap-2 font-mono text-sm font-semibold"
+                >
+                    <GitBranch className="h-4 w-4" />
+                    Shiplog
+                </a>
+
+                <div className="flex items-center gap-5">
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-0 font-mono text-xs text-muted-foreground"
+                        disabled
+                    >
+                        Insights
+                    </Button>
+                    <SettingsDialog
+                        accentColor={accentColor}
+                        onAccentColorChange={onAccentColorChange}
+                    />
+                    <AccountsDialog
+                        installations={installations}
+                        selectedInstallationIds={selectedInstallationIds}
+                        onSelectedInstallationIdsChange={
+                            onSelectedInstallationIdsChange
+                        }
+                    />
+                </div>
+            </nav>
+        </div>
+    );
+}
+
+function AccountsDialog({
+    installations,
+    selectedInstallationIds,
+    onSelectedInstallationIdsChange,
+}: {
+    installations: GitHubInstallation[];
+    selectedInstallationIds: number[];
+    onSelectedInstallationIdsChange: (installationIds: number[]) => void;
+}) {
+    const selectedInstallationIdSet = useMemo(
+        () => new Set(selectedInstallationIds),
+        [selectedInstallationIds],
+    );
+    const reloadDashboard = (nextInstallationIds: number[]) => {
+        onSelectedInstallationIdsChange(nextInstallationIds);
+
+        router.reload({
+            only: [
+                'selectedInstallationIds',
+                'activityItems',
+                'last24HoursSummary',
+                'pullRequestStatusItems',
+                'pullRequestsToReviewItems',
+                'last7DaysActivity',
+                'activityHeatmap',
+                'todayActivityByRepository',
+            ],
+            reset: ['activityItems'],
+            data: {
+                account_filter: 1,
+                selected_installations: nextInstallationIds,
+            },
+        });
+    };
+    const toggleInstallation = (installationId: number, checked: boolean) => {
+        const nextInstallationIds = checked
+            ? [...selectedInstallationIds, installationId]
+            : selectedInstallationIds.filter((id) => id !== installationId);
+
+        reloadDashboard([...new Set(nextInstallationIds)]);
+    };
+
+    return (
+        <Dialog>
+            <DialogTrigger asChild>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-0 font-mono text-xs"
+                >
+                    Accounts
+                    {installations.length > 0 && (
+                        <span className="ml-1 text-muted-foreground">
+                            {installations.length}
+                        </span>
+                    )}
+                </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-xl">
+                <DialogHeader>
+                    <DialogTitle className="font-mono">
+                        Connected Accounts
+                    </DialogTitle>
+                    <DialogDescription>
+                        GitHub App installations feeding this dashboard.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                    {installations.length === 0 ? (
+                        <div className="rounded-md border border-dashed px-4 py-8 text-center">
+                            <GitBranch className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
+                            <p className="font-mono text-sm font-medium">
+                                No accounts connected
+                            </p>
+                        </div>
+                    ) : (
+                        <ConnectedAccounts
+                            installations={installations}
+                            selectedInstallationIdSet={selectedInstallationIdSet}
+                            onToggleInstallation={toggleInstallation}
+                        />
+                    )}
+
+                    <Button asChild className="w-full" size="sm">
+                        <a href={redirect.url()}>
+                            <Plus className="h-4 w-4" />
+                            Connect GitHub
+                        </a>
+                    </Button>
+                </div>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function SettingsDialog({
+    accentColor,
+    onAccentColorChange,
+}: {
+    accentColor: AccentColor;
+    onAccentColorChange: (color: AccentColor) => void;
+}) {
+    return (
+        <Dialog>
+            <DialogTrigger asChild>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-0 font-mono text-xs text-muted-foreground"
+                >
+                    Settings
+                </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="font-mono">Settings</DialogTitle>
+                    <DialogDescription>
+                        Adjust the dashboard appearance.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-5">
+                    <div className="space-y-2">
+                        <p className="font-mono text-xs font-medium">
+                            Appearance
+                        </p>
+                        <AppearanceToggleTab />
+                    </div>
+
+                    <div className="space-y-2">
+                        <p className="font-mono text-xs font-medium">
+                            Accent color
+                        </p>
+                        <div className="grid grid-cols-4 gap-2">
+                            {(Object.keys(accentPresets) as AccentColor[]).map(
+                                (color) => {
+                                    const preset = accentPresets[color];
+                                    const isSelected = accentColor === color;
+
+                                    return (
+                                        <button
+                                            key={color}
+                                            type="button"
+                                            onClick={() =>
+                                                onAccentColorChange(color)
+                                            }
+                                            className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-left font-mono text-xs transition-colors hover:bg-muted ${isSelected ? 'border-[var(--shiplog-accent)] bg-[var(--shiplog-accent-soft)] text-foreground' : 'border-border text-muted-foreground'}`}
+                                        >
+                                            <span
+                                                className="h-3 w-3 shrink-0 rounded-full"
+                                                style={{
+                                                    backgroundColor:
+                                                        preset.color,
+                                                    boxShadow: `0 0 8px ${preset.shadow}`,
+                                                }}
+                                            />
+                                            {preset.label}
+                                        </button>
+                                    );
+                                },
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -315,66 +703,80 @@ function EmptyState() {
 
 function ConnectedAccounts({
     installations,
+    selectedInstallationIdSet,
+    onToggleInstallation,
 }: {
     installations: GitHubInstallation[];
+    selectedInstallationIdSet: Set<number>;
+    onToggleInstallation: (installationId: number, checked: boolean) => void;
 }) {
     return (
-        <Panel title="Connected Accounts">
-            <ul className="divide-y divide-border">
-                {installations.map((installation) => (
-                    <li
-                        key={installation.id}
-                        className="flex items-center justify-between gap-4 px-4 py-3"
-                    >
-                        <div className="flex min-w-0 items-center gap-3">
-                            <Avatar className="h-8 w-8">
-                                <AvatarImage
-                                    src={installation.avatar_url ?? undefined}
-                                    alt={installation.account_login}
-                                />
-                                <AvatarFallback>
-                                    {installation.account_login
-                                        .slice(0, 2)
-                                        .toUpperCase()}
-                                </AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0">
-                                <p className="truncate font-mono text-sm leading-none font-medium">
-                                    {installation.account_name ??
-                                        installation.account_login}
-                                </p>
-                                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                                    @{installation.account_login}
-                                </p>
-                            </div>
-                            <Badge variant="secondary" className="text-xs">
-                                {installation.account_type}
-                            </Badge>
-                            <SyncStatusBadge installation={installation} />
-                        </div>
-
-                        <Form
-                            {...destroy.form({
-                                installation: installation.id,
-                            })}
-                        >
-                            {({ processing }) => (
-                                <Button
-                                    type="submit"
-                                    variant="ghost"
-                                    size="sm"
-                                    disabled={processing}
-                                    className="text-destructive hover:text-destructive"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                    <span className="sr-only">Disconnect</span>
-                                </Button>
+        <ul className="divide-y divide-border rounded-md border">
+            {installations.map((installation) => (
+                <li
+                    key={installation.id}
+                    className="flex items-center justify-between gap-4 px-4 py-3"
+                >
+                    <div className="flex min-w-0 items-center gap-3">
+                        <Checkbox
+                            checked={selectedInstallationIdSet.has(
+                                installation.id,
                             )}
-                        </Form>
-                    </li>
-                ))}
-            </ul>
-        </Panel>
+                            onCheckedChange={(checked) =>
+                                onToggleInstallation(
+                                    installation.id,
+                                    checked === true,
+                                )
+                            }
+                            aria-label={`Include ${installation.account_login} activity in dashboard`}
+                        />
+                        <Avatar className="h-8 w-8">
+                            <AvatarImage
+                                src={installation.avatar_url ?? undefined}
+                                alt={installation.account_login}
+                            />
+                            <AvatarFallback>
+                                {installation.account_login
+                                    .slice(0, 2)
+                                    .toUpperCase()}
+                            </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                            <p className="truncate font-mono text-sm leading-none font-medium">
+                                {installation.account_name ??
+                                    installation.account_login}
+                            </p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                                @{installation.account_login}
+                            </p>
+                        </div>
+                        <Badge variant="secondary" className="text-xs">
+                            {installation.account_type}
+                        </Badge>
+                        <SyncStatusBadge installation={installation} />
+                    </div>
+
+                    <Form
+                        {...destroy.form({
+                            installation: installation.id,
+                        })}
+                    >
+                        {({ processing }) => (
+                            <Button
+                                type="submit"
+                                variant="ghost"
+                                size="sm"
+                                disabled={processing}
+                                className="text-destructive hover:text-destructive"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                <span className="sr-only">Disconnect</span>
+                            </Button>
+                        )}
+                    </Form>
+                </li>
+            ))}
+        </ul>
     );
 }
 
@@ -420,7 +822,13 @@ function SyncStatusBadge({
     );
 }
 
-function Last24HoursSummaryCards({ summary }: { summary: Last24HoursSummary }) {
+function Last24HoursSummaryCards({
+    summary,
+    repositories,
+}: {
+    summary: Last24HoursSummary;
+    repositories: RepositoryActivityPartition[];
+}) {
     return (
         <section className="space-y-3">
             <h2 className="font-mono text-sm font-semibold">Last 24h</h2>
@@ -451,6 +859,7 @@ function Last24HoursSummaryCards({ summary }: { summary: Last24HoursSummary }) {
                     muted={summary.production_deploys === null}
                 />
             </div>
+            <TodayRepositoryPartition repositories={repositories} />
         </section>
     );
 }
@@ -478,40 +887,312 @@ function MiniSummaryCard({
     );
 }
 
-function TodayRepositoryPartition({
-    repositories,
+function PullRequestStatusPanel({
+    pullRequests,
 }: {
-    repositories: RepositoryActivityPartition[];
+    pullRequests: PullRequestStatusItem[];
 }) {
-    const total = repositories.reduce(
-        (sum, repository) => sum + repository.total,
-        0,
-    );
-    const colors = [
-        'bg-green-300',
-        'bg-green-400',
-        'bg-green-500',
-        'bg-emerald-500',
-        'bg-lime-400',
-        'bg-teal-400',
-    ];
+    const isPreview = pullRequests.length === 0;
+    const displayedPullRequests = isPreview
+        ? previewPullRequestStatusItems()
+        : pullRequests;
 
     return (
         <section className="space-y-3">
             <div className="flex items-end justify-between gap-4">
                 <div>
                     <h2 className="font-mono text-sm font-semibold">
-                        Today By Repository
+                        PR Status
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                        Total activity per repository today
+                        Drafts, open PRs, and PRs merged today
                     </p>
                 </div>
                 <p className="font-mono text-xs text-muted-foreground">
-                    {total} total
+                    {isPreview ? 'preview' : `${pullRequests.length} total`}
                 </p>
             </div>
 
+            <TooltipProvider delayDuration={100}>
+                <div className="grid gap-1.5">
+                {displayedPullRequests.map((pullRequest) => (
+                    <a
+                        key={pullRequest.id}
+                        href={isPreview ? undefined : pullRequest.url}
+                        target={isPreview ? undefined : '_blank'}
+                        rel={isPreview ? undefined : 'noreferrer'}
+                        aria-disabled={isPreview}
+                        onClick={(event) => {
+                            if (isPreview) {
+                                event.preventDefault();
+                            }
+                        }}
+                        className={`group grid grid-cols-[1rem_minmax(0,1fr)] gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--shiplog-accent-soft)] ${isPreview ? 'opacity-75' : ''}`}
+                    >
+                        <PullRequestStatusIndicator status={pullRequest.status} />
+
+                        <div className="min-w-0">
+                            <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
+                                <Badge
+                                    variant="outline"
+                                    className="h-4 max-w-full rounded-sm border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--shiplog-accent)]"
+                                    title={
+                                        pullRequest.repository ??
+                                        'Unknown repo'
+                                    }
+                                >
+                                {pullRequest.repository
+                                    ? shortRepositoryName(
+                                          pullRequest.repository,
+                                      )
+                                    : 'Unknown repo'}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                    #{pullRequest.number}
+                                    {pullRequest.merged_at
+                                        ? ` · ${formatRelativeTime(pullRequest.merged_at)}`
+                                        : pullRequest.updated_at
+                                          ? ` · ${formatRelativeTime(pullRequest.updated_at)}`
+                                          : ''}
+                                </span>
+                            </div>
+                            <p
+                                className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:underline"
+                                title={pullRequest.title}
+                            >
+                                {pullRequest.title}
+                            </p>
+                        </div>
+                    </a>
+                ))}
+                </div>
+            </TooltipProvider>
+        </section>
+    );
+}
+
+function previewPullRequestStatusItems(): PullRequestStatusItem[] {
+    return [
+        {
+            id: -1,
+            title: '[SHIP-18] Add activity event normalization',
+            repository: 'k-milan/shiplog',
+            number: 128,
+            status: 'open',
+            url: '#',
+            updated_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
+            merged_at: null,
+        },
+        {
+            id: -2,
+            title: '[MNT-10] Display requests and notify caregivers',
+            repository: 'kfm-rcc/royalcarecompanion-web',
+            number: 64,
+            status: 'draft',
+            url: '#',
+            updated_at: new Date(Date.now() - 46 * 60 * 1000).toISOString(),
+            merged_at: null,
+        },
+        {
+            id: -3,
+            title: '[CRTE-31] Partner dashboard polish',
+            repository: 'k-milan/courte-ui',
+            number: 41,
+            status: 'approved',
+            url: '#',
+            updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+            merged_at: null,
+        },
+        {
+            id: -4,
+            title: '[RCC-22] Fix caregiver notification edge case',
+            repository: 'kfm-rcc/royalcarecompanion-web',
+            number: 65,
+            status: 'changes requested',
+            url: '#',
+            updated_at: new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(),
+            merged_at: null,
+        },
+        {
+            id: -5,
+            title: '[CRTE-30] Merge availability exceptions',
+            repository: 'k-milan/courte-ui',
+            number: 40,
+            status: 'merged today',
+            url: '#',
+            updated_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+            merged_at: new Date(Date.now() - 38 * 60 * 1000).toISOString(),
+        },
+    ];
+}
+
+function PullRequestsToReviewPanel({
+    reviewRequests,
+}: {
+    reviewRequests: PullRequestToReviewItem[];
+}) {
+    return (
+        <section className="space-y-3">
+            <div className="flex items-end justify-between gap-4">
+                <div>
+                    <h2 className="font-mono text-sm font-semibold">
+                        PRs To Review
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                        Open PRs requesting your review
+                    </p>
+                </div>
+                <p className="font-mono text-xs text-muted-foreground">
+                    {reviewRequests.length} total
+                </p>
+            </div>
+
+            {reviewRequests.length === 0 ? (
+                <div className="rounded-md border bg-background/35 px-3 py-3 text-xs text-muted-foreground">
+                    No open PRs are requesting review from selected accounts.
+                </div>
+            ) : (
+                <div className="grid gap-1.5">
+                    {reviewRequests.map((pullRequest) => (
+                        <a
+                            key={pullRequest.id}
+                            href={pullRequest.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group block rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--shiplog-accent-soft)]"
+                        >
+                            <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
+                                <Badge
+                                    variant="outline"
+                                    className="h-4 max-w-full rounded-sm border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--shiplog-accent)]"
+                                    title={
+                                        pullRequest.repository ??
+                                        'Unknown repo'
+                                    }
+                                >
+                                    {pullRequest.repository
+                                        ? shortRepositoryName(
+                                              pullRequest.repository,
+                                          )
+                                        : 'Unknown repo'}
+                                </Badge>
+                                <span className="min-w-0 text-xs text-muted-foreground">
+                                    {pullRequest.author
+                                        ? `By ${pullRequest.author}`
+                                        : 'Unknown author'}
+                                    {pullRequest.updated_at
+                                        ? ` · ${formatRelativeTime(pullRequest.updated_at)}`
+                                        : ''}
+                                </span>
+                            </div>
+                            <p
+                                className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:underline"
+                                title={pullRequest.title}
+                            >
+                                {pullRequest.title}
+                            </p>
+                        </a>
+                    ))}
+                </div>
+            )}
+        </section>
+    );
+}
+
+function PullRequestStatusIndicator({ status }: { status: string }) {
+    const details = pullRequestStatusDetails(status);
+
+    return (
+        <UiTooltip>
+            <TooltipTrigger asChild>
+                <span
+                    aria-label={details.label}
+                    className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded-full border ${details.className}`}
+                >
+                    {details.icon}
+                </span>
+            </TooltipTrigger>
+            <TooltipContent>
+                <p className="font-mono text-xs">{details.label}</p>
+            </TooltipContent>
+        </UiTooltip>
+    );
+}
+
+function pullRequestStatusDetails(status: string): {
+    label: string;
+    className: string;
+    icon: ReactNode;
+} {
+    const iconClassName = 'h-2.5 w-2.5';
+
+    if (status === 'approved') {
+        return {
+            label: 'Approved',
+            className:
+                'border-emerald-500/50 bg-emerald-500/15 text-emerald-500 shadow-[0_0_6px_rgb(16_185_129_/_0.35)]',
+            icon: <Check className={iconClassName} />,
+        };
+    }
+
+    if (status === 'merged today') {
+        return {
+            label: 'Merged today',
+            className:
+                'border-violet-500/50 bg-violet-500/15 text-violet-500 shadow-[0_0_6px_rgb(139_92_246_/_0.35)]',
+            icon: <GitMerge className={iconClassName} />,
+        };
+    }
+
+    if (status === 'closed') {
+        return {
+            label: 'Closed',
+            className:
+                'border-red-500/50 bg-red-500/15 text-red-500 shadow-[0_0_6px_rgb(239_68_68_/_0.35)]',
+            icon: <X className={iconClassName} />,
+        };
+    }
+
+    if (status === 'changes requested' || status === 'commented') {
+        return {
+            label: status === 'changes requested' ? 'Changes requested' : 'Has comments',
+            className:
+                'border-amber-400/50 bg-amber-400/15 text-amber-400 shadow-[0_0_6px_rgb(251_191_36_/_0.35)]',
+            icon: <MessageSquareText className={iconClassName} />,
+        };
+    }
+
+    if (status === 'draft') {
+        return {
+            label: 'Draft',
+            className:
+                'border-muted-foreground/40 bg-muted-foreground/10 text-muted-foreground',
+            icon: <GitPullRequest className={iconClassName} />,
+        };
+    }
+
+    return {
+        label: 'Open',
+        className:
+            'border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] text-[var(--shiplog-accent)] shadow-[0_0_6px_var(--shiplog-accent-shadow)]',
+        icon: <GitPullRequest className={iconClassName} />,
+    };
+}
+
+function TodayRepositoryPartition({
+    repositories,
+}: {
+    repositories: RepositoryActivityPartition[];
+}) {
+    const colors = [
+        'bg-[var(--shiplog-accent-4)]',
+        'bg-[var(--shiplog-accent-3)]',
+        'bg-[var(--shiplog-accent-2)]',
+        'bg-[var(--shiplog-accent-1)]',
+    ];
+
+    return (
+        <div>
             {repositories.length === 0 ? (
                 <div className="rounded-md border bg-background/35 px-3 py-3 text-xs text-muted-foreground">
                     No repository activity recorded today.
@@ -537,6 +1218,155 @@ function TodayRepositoryPartition({
                     </PartitionBar>
                 </div>
             )}
+        </div>
+    );
+}
+
+function ActivityDashboardGrid({
+    selectedInstallationIds,
+    pullRequests,
+    reviewRequests,
+}: {
+    selectedInstallationIds: number[];
+    pullRequests: PullRequestStatusItem[];
+    reviewRequests: PullRequestToReviewItem[];
+}) {
+    const prColumnRef = useRef<HTMLDivElement>(null);
+    const [feedHeight, setFeedHeight] = useState<number | null>(null);
+
+    useEffect(() => {
+        const element = prColumnRef.current;
+
+        if (!element) {
+            return;
+        }
+
+        const updateFeedHeight = (): void => {
+            if (!window.matchMedia('(min-width: 1024px)').matches) {
+                setFeedHeight(null);
+
+                return;
+            }
+
+            setFeedHeight(element.getBoundingClientRect().height);
+        };
+
+        updateFeedHeight();
+
+        const resizeObserver = new ResizeObserver(updateFeedHeight);
+        resizeObserver.observe(element);
+        window.addEventListener('resize', updateFeedHeight);
+
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener('resize', updateFeedHeight);
+        };
+    }, [pullRequests, reviewRequests]);
+
+    return (
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+            <div
+                className="order-3 h-96 min-h-0 min-w-0 shrink-0 overflow-hidden lg:order-1 lg:w-1/2"
+                style={
+                    feedHeight !== null ? { height: feedHeight } : undefined
+                }
+            >
+                <ActivityFeedPanel
+                    selectedInstallationIds={selectedInstallationIds}
+                />
+            </div>
+
+            <div
+                ref={prColumnRef}
+                className="order-1 flex min-w-0 flex-col gap-6 lg:order-2 lg:w-1/2"
+            >
+                <div className="min-h-0 flex-1 overflow-hidden">
+                    <PullRequestStatusPanel pullRequests={pullRequests} />
+                </div>
+                <div className="min-h-0 flex-1 overflow-hidden">
+                    <PullRequestsToReviewPanel
+                        reviewRequests={reviewRequests}
+                    />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ActivityChartsGrid({
+    last7DaysActivity,
+    activityHeatmap,
+}: {
+    last7DaysActivity: ActivityChartPoint[];
+    activityHeatmap: ActivityHeatmap;
+}) {
+    return (
+        <div className="grid gap-6 lg:grid-cols-2">
+            <Last7DaysActivityChart data={last7DaysActivity} />
+            <ActivityHeatmapPanel heatmap={activityHeatmap} />
+        </div>
+    );
+}
+
+function ActivityFeedPanel({
+    selectedInstallationIds,
+}: {
+    selectedInstallationIds: number[];
+}) {
+    const { activityItems } = usePage<Props>().props;
+    const previousActivityIds = useRef<string[] | null>(null);
+    const animationTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [newActivityItemIds, setNewActivityItemIds] = useState<Set<string>>(
+        () => new Set(),
+    );
+    const items = useMemo(() => activityItems.data ?? [], [activityItems.data]);
+
+    useEffect(() => {
+        const currentIds = items.map((item) => item.id);
+        const previousIds = previousActivityIds.current;
+
+        if (previousIds === null) {
+            previousActivityIds.current = currentIds;
+
+            return;
+        }
+
+        const previousFirstId = previousIds[0];
+        const previousFirstIndex = previousFirstId
+            ? currentIds.indexOf(previousFirstId)
+            : -1;
+        const incomingIds =
+            previousFirstIndex > 0
+                ? currentIds.slice(0, previousFirstIndex)
+                : currentIds.filter((id) => !previousIds.includes(id));
+
+        if (incomingIds.length > 0) {
+            setNewActivityItemIds(new Set(incomingIds));
+
+            if (animationTimeout.current !== null) {
+                clearTimeout(animationTimeout.current);
+            }
+
+            animationTimeout.current = setTimeout(() => {
+                setNewActivityItemIds(new Set());
+                animationTimeout.current = null;
+            }, 1200);
+        }
+
+        previousActivityIds.current = currentIds;
+    }, [items]);
+
+    return (
+        <section className="flex h-full min-h-0 flex-col">
+            <h2 className="mb-3 shrink-0 font-mono text-sm font-semibold">
+                Activity Feed
+            </h2>
+            <div className="min-h-0 flex-1 overflow-hidden">
+                <ActivityTimeline
+                    selectedInstallationIds={selectedInstallationIds}
+                    newItemIds={newActivityItemIds}
+                />
+            </div>
         </section>
     );
 }
@@ -544,18 +1374,15 @@ function TodayRepositoryPartition({
 function ActivityHeatmapPanel({ heatmap }: { heatmap: ActivityHeatmap }) {
     return (
         <section className="space-y-3">
-            <div className="flex items-end justify-between gap-4">
+            <div>
                 <div>
                     <h2 className="font-mono text-sm font-semibold">
                         Activity Heatmap
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                        Daily activity over the last 12 weeks
+                        Daily activity over the last 6 months
                     </p>
                 </div>
-                <p className="font-mono text-xs text-muted-foreground">
-                    {heatmap.total} total
-                </p>
             </div>
 
             <div className="overflow-x-auto rounded-md border bg-background/35 p-3">
@@ -566,10 +1393,10 @@ function ActivityHeatmapPanel({ heatmap }: { heatmap: ActivityHeatmap }) {
                     colorMode="discrete"
                     colorScale={[
                         'oklch(26.9% 0 0 / 0.72)',
-                        'oklch(44.8% 0.119 151.328)',
-                        'oklch(62.7% 0.194 149.214)',
-                        'oklch(72.3% 0.219 149.579)',
-                        'oklch(87.1% 0.15 154.449)',
+                        'var(--shiplog-accent-1)',
+                        'var(--shiplog-accent-2)',
+                        'var(--shiplog-accent-3)',
+                        'var(--shiplog-accent-4)',
                     ]}
                     cellSize={13}
                     gap={3}
@@ -594,7 +1421,7 @@ function ActivityHeatmapPanel({ heatmap }: { heatmap: ActivityHeatmap }) {
 function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
     return (
         <section className="space-y-3">
-            <div className="flex items-end justify-between gap-4">
+            <div>
                 <div>
                     <h2 className="font-mono text-sm font-semibold">
                         Last 7 Days
@@ -603,9 +1430,6 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
                         Total activity per day
                     </p>
                 </div>
-                <p className="font-mono text-xs text-muted-foreground">
-                    {data.reduce((sum, point) => sum + point.total, 0)} total
-                </p>
             </div>
 
             <div className="rounded-md border bg-background/35 p-3">
@@ -625,12 +1449,12 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
                             >
                                 <stop
                                     offset="5%"
-                                    stopColor="oklch(72.3% 0.219 149.579)"
+                                    stopColor="var(--shiplog-accent)"
                                     stopOpacity={0.46}
                                 />
                                 <stop
                                     offset="95%"
-                                    stopColor="oklch(72.3% 0.219 149.579)"
+                                    stopColor="var(--shiplog-accent)"
                                     stopOpacity={0.04}
                                 />
                             </linearGradient>
@@ -658,7 +1482,7 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
                         />
                         <Tooltip
                             cursor={{
-                                stroke: 'oklch(72.3% 0.219 149.579)',
+                                stroke: 'var(--shiplog-accent)',
                                 strokeOpacity: 0.32,
                             }}
                             content={({ active, payload, label }) => {
@@ -681,17 +1505,17 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
                         <Area
                             type="monotone"
                             dataKey="total"
-                            stroke="oklch(72.3% 0.219 149.579)"
+                            stroke="var(--shiplog-accent)"
                             strokeWidth={2}
                             fill="url(#activity-total)"
                             dot={{
                                 r: 3,
-                                fill: 'oklch(72.3% 0.219 149.579)',
+                                fill: 'var(--shiplog-accent)',
                                 strokeWidth: 0,
                             }}
                             activeDot={{
                                 r: 4,
-                                fill: 'oklch(72.3% 0.219 149.579)',
+                                fill: 'var(--shiplog-accent)',
                                 strokeWidth: 0,
                             }}
                         />
@@ -702,35 +1526,35 @@ function Last7DaysActivityChart({ data }: { data: ActivityChartPoint[] }) {
     );
 }
 
-function Panel({ title, children }: { title: string; children: ReactNode }) {
-    return (
-        <section className="overflow-hidden rounded-lg border">
-            <div className="border-b px-4 py-3">
-                <h2 className="font-mono text-sm font-semibold">{title}</h2>
-            </div>
-            {children}
-        </section>
-    );
-}
-
-function ActivityTimeline({
-    items,
+const ActivityTimeline = function ActivityTimeline({
+    selectedInstallationIds,
     newItemIds,
 }: {
-    items: ActivityItem[];
+    selectedInstallationIds: number[];
     newItemIds: Set<string>;
 }) {
+    const { activityItems } = usePage<Props>().props;
+    const items = activityItems.data ?? [];
+    const infiniteScrollParams = useMemo(
+        () => ({
+            data: {
+                account_filter: 1,
+                selected_installations: selectedInstallationIds,
+            },
+        }),
+        [selectedInstallationIds],
+    );
+
     if (items.length === 0) {
         return (
-            <div className="flex min-h-[22rem] items-center justify-center rounded-md border border-dashed bg-background/20 px-6 py-10 text-center">
+            <div className="flex h-full min-h-48 items-center justify-center px-6 py-10 text-center">
                 <div>
                     <GitCommitHorizontal className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
                     <p className="font-mono text-sm font-medium">
-                        No activity in the last 24 hours
+                        No activity yet
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                        New commits, pull requests, and reviews will stream in
-                        here.
+                        Commits, pull requests, and reviews will stream in here.
                     </p>
                 </div>
             </div>
@@ -739,30 +1563,32 @@ function ActivityTimeline({
 
     return (
         <div
-            className="relative [--timeline-color:theme(colors.green.500)]"
+            className="relative flex h-full min-h-0 flex-col [--timeline-color:var(--shiplog-accent)]"
             style={
                 {
-                    '--timeline-color': 'oklch(72.3% 0.219 149.579)',
+                    '--timeline-color': 'var(--shiplog-accent)',
                 } as React.CSSProperties
             }
         >
             <ScrollFade
                 axis="vertical"
                 intensity={0.85}
-                className="max-h-[50rem] px-3"
+                className="h-full px-3"
             >
                 <InfiniteScroll
                     data="activityItems"
                     onlyNext
+                    preserveUrl={false}
                     buffer={240}
+                    params={infiniteScrollParams}
                     itemsElement="#activity-timeline-items"
                     loading={
                         <p className="py-2 pl-9 text-xs text-muted-foreground">
                             Loading more activity...
                         </p>
                     }
-                    next={({ hasMore, fetch, loading, manualMode }) =>
-                        hasMore && manualMode ? (
+                    next={({ hasMore, fetch, loading }) =>
+                        hasMore ? (
                             <div className="py-2 pl-9">
                                 <Button
                                     type="button"
@@ -791,9 +1617,9 @@ function ActivityTimeline({
             </ScrollFade>
         </div>
     );
-}
+};
 
-function ActivityTimelineItem({
+const ActivityTimelineItem = memo(function ActivityTimelineItem({
     item,
     isLast,
     isNew,
@@ -818,9 +1644,26 @@ function ActivityTimelineItem({
                 </span>
             </div>
             <div className="pb-3">
-                <p className="mb-0.5 font-mono text-[0.68rem] leading-none text-muted-foreground">
-                    {formatRelativeTime(item.occurred_at)}
-                </p>
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono text-[0.68rem] leading-none text-muted-foreground">
+                        {formatRelativeTime(item.occurred_at)}
+                    </span>
+                    {item.repository && (
+                        <Badge
+                            variant="outline"
+                            className="h-4 max-w-36 truncate rounded-sm border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--shiplog-accent)]"
+                            title={item.repository}
+                        >
+                            {shortRepositoryName(item.repository)}
+                        </Badge>
+                    )}
+                    <Badge
+                        variant="outline"
+                        className="h-4 rounded-sm border-muted-foreground/25 px-1.5 font-mono text-[0.6rem] leading-none text-muted-foreground"
+                    >
+                        {activityLabel(item.type)}
+                    </Badge>
+                </div>
                 <p
                     className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:line-clamp-none group-hover:underline"
                     title={item.title}
@@ -828,8 +1671,6 @@ function ActivityTimelineItem({
                     {item.title}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                    {activityLabel(item.type)}
-                    {item.repository ? ` · ${item.repository}` : ''} ·{' '}
                     {item.actor ?? 'Unknown'}
                     {item.reference ? ` · ${item.reference}` : ''}
                     {item.state ? ` · ${item.state.toLowerCase()}` : ''} ·{' '}
@@ -838,7 +1679,7 @@ function ActivityTimelineItem({
             </div>
         </a>
     );
-}
+});
 
 function StatusMessage({
     children,
@@ -850,7 +1691,7 @@ function StatusMessage({
     const className = {
         neutral: 'border-border text-muted-foreground',
         success:
-            'border-green-200 text-green-700 dark:border-green-900 dark:text-green-400',
+            'border-[var(--shiplog-accent-border)] bg-[var(--shiplog-accent-soft)] text-[var(--shiplog-accent)]',
         error: 'border-destructive/30 text-destructive',
     }[variant];
 

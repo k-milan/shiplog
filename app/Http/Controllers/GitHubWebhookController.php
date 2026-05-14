@@ -142,6 +142,15 @@ final readonly class GitHubWebhookController
         $repositoryPayload = $payload['repository'];
         /** @var array<string, mixed> $pullRequestPayload */
         $pullRequestPayload = $payload['pull_request'];
+        $action = is_string($payload['action'] ?? null) ? $payload['action'] : null;
+
+        if ($action === 'review_requested' && is_array($payload['requested_reviewer'] ?? null)) {
+            $pullRequestPayload = $this->addRequestedReviewer($pullRequestPayload, $payload['requested_reviewer']);
+        }
+
+        if ($action === 'review_request_removed' && is_array($payload['requested_reviewer'] ?? null)) {
+            $pullRequestPayload = $this->removeRequestedReviewer($pullRequestPayload, $payload['requested_reviewer']);
+        }
 
         $repository = $this->ingestion->upsertRepository($installation, $repositoryPayload);
         $this->ingestion->upsertPullRequest($repository, $pullRequestPayload);
@@ -180,6 +189,71 @@ final readonly class GitHubWebhookController
             ?? $this->ingestion->upsertPullRequest($repository, $pullRequestPayload);
 
         $this->ingestion->upsertPullRequestReview($pullRequest, $reviewPayload);
+
+        if (is_array($reviewPayload['user'] ?? null)) {
+            $updatedPayload = $this->removeRequestedReviewer(
+                is_array($pullRequest->payload) ? $pullRequest->payload : $pullRequestPayload,
+                $reviewPayload['user'],
+            );
+
+            $pullRequest->forceFill(['payload' => $updatedPayload])->save();
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $pullRequestPayload
+     * @param  array<string, mixed>  $reviewer
+     * @return array<string, mixed>
+     */
+    private function addRequestedReviewer(array $pullRequestPayload, array $reviewer): array
+    {
+        $reviewerLogin = $reviewer['login'] ?? null;
+
+        if (! is_string($reviewerLogin) || $reviewerLogin === '') {
+            return $pullRequestPayload;
+        }
+
+        $requestedReviewers = is_array($pullRequestPayload['requested_reviewers'] ?? null)
+            ? $pullRequestPayload['requested_reviewers']
+            : [];
+
+        $alreadyRequested = collect($requestedReviewers)
+            ->contains(fn (mixed $requestedReviewer): bool => is_array($requestedReviewer)
+                && ($requestedReviewer['login'] ?? null) === $reviewerLogin);
+
+        if (! $alreadyRequested) {
+            $requestedReviewers[] = $reviewer;
+        }
+
+        $pullRequestPayload['requested_reviewers'] = array_values($requestedReviewers);
+
+        return $pullRequestPayload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $pullRequestPayload
+     * @param  array<string, mixed>  $reviewer
+     * @return array<string, mixed>
+     */
+    private function removeRequestedReviewer(array $pullRequestPayload, array $reviewer): array
+    {
+        $reviewerLogin = $reviewer['login'] ?? null;
+
+        if (! is_string($reviewerLogin) || $reviewerLogin === '') {
+            return $pullRequestPayload;
+        }
+
+        $requestedReviewers = is_array($pullRequestPayload['requested_reviewers'] ?? null)
+            ? $pullRequestPayload['requested_reviewers']
+            : [];
+
+        $pullRequestPayload['requested_reviewers'] = collect($requestedReviewers)
+            ->reject(fn (mixed $requestedReviewer): bool => is_array($requestedReviewer)
+                && ($requestedReviewer['login'] ?? null) === $reviewerLogin)
+            ->values()
+            ->all();
+
+        return $pullRequestPayload;
     }
 
     /**

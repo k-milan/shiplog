@@ -68,7 +68,7 @@ export function ScrollFade({
 
     useLayoutEffect(() => {
         requestAnimationFrame(checkScroll);
-    }, [checkScroll]);
+    }, [checkScroll, children]);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -99,7 +99,7 @@ export function ScrollFade({
     }, [checkScroll]);
 
     return (
-        <div className="relative">
+        <div className={cn('relative min-h-0', (axis === 'vertical' || axis === 'both') && 'h-full')}>
             <div
                 ref={containerRef}
                 className={cn(

@@ -290,6 +290,7 @@ function browserDisplayTimezone(): string {
 }
 
 interface Props extends Record<string, unknown> {
+    canManageConnections: boolean;
     installations: GitHubInstallation[];
     selectedInstallationIds: number[];
     aggregationTimezone: string;
@@ -304,6 +305,7 @@ interface Props extends Record<string, unknown> {
 }
 
 export default function GitHubIndex({
+    canManageConnections = false,
     installations = [],
     selectedInstallationIds: initialSelectedInstallationIds = [],
     aggregationTimezone = 'UTC',
@@ -434,6 +436,7 @@ export default function GitHubIndex({
                 onSelectedInstallationIdsChange={setSelectedInstallationIds}
                 accentColor={accentColor}
                 onAccentColorChange={updateAccentColor}
+                canManageConnections={canManageConnections}
             />
 
             <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-6xl flex-col px-4 pt-4 pb-10 sm:px-6">
@@ -466,7 +469,7 @@ export default function GitHubIndex({
                     )}
 
                     {installations.length === 0 ? (
-                        <EmptyState />
+                        <EmptyState canManageConnections={canManageConnections} />
                     ) : (
                         <>
                             {hasSyncInProgress && (
@@ -521,6 +524,7 @@ function TopNav({
     onSelectedInstallationIdsChange,
     accentColor,
     onAccentColorChange,
+    canManageConnections,
 }: {
     installations: GitHubInstallation[];
     selectedInstallationIds: number[];
@@ -528,6 +532,7 @@ function TopNav({
     onSelectedInstallationIdsChange: (installationIds: number[]) => void;
     accentColor: AccentColor;
     onAccentColorChange: (color: AccentColor) => void;
+    canManageConnections: boolean;
 }) {
     return (
         <div className="sticky top-0 z-40">
@@ -562,6 +567,7 @@ function TopNav({
                         onSelectedInstallationIdsChange={
                             onSelectedInstallationIdsChange
                         }
+                        canManageConnections={canManageConnections}
                     />
                 </div>
             </nav>
@@ -574,11 +580,13 @@ function AccountsDialog({
     selectedInstallationIds,
     displayTimezone,
     onSelectedInstallationIdsChange,
+    canManageConnections,
 }: {
     installations: GitHubInstallation[];
     selectedInstallationIds: number[];
     displayTimezone: string;
     onSelectedInstallationIdsChange: (installationIds: number[]) => void;
+    canManageConnections: boolean;
 }) {
     const selectedInstallationIdSet = useMemo(
         () => new Set(selectedInstallationIds),
@@ -655,15 +663,18 @@ function AccountsDialog({
                             installations={installations}
                             selectedInstallationIdSet={selectedInstallationIdSet}
                             onToggleInstallation={toggleInstallation}
+                            canManageConnections={canManageConnections}
                         />
                     )}
 
-                    <Button asChild className="w-full" size="sm">
-                        <a href={redirect.url()}>
-                            <Plus className="h-4 w-4" />
-                            Connect GitHub
-                        </a>
-                    </Button>
+                    {canManageConnections && (
+                        <Button asChild className="w-full" size="sm">
+                            <a href={redirect.url()}>
+                                <Plus className="h-4 w-4" />
+                                Connect GitHub
+                            </a>
+                        </Button>
+                    )}
                 </div>
             </DialogContent>
         </Dialog>
@@ -745,7 +756,7 @@ function SettingsDialog({
     );
 }
 
-function EmptyState() {
+function EmptyState({ canManageConnections }: { canManageConnections: boolean }) {
     return (
         <section className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
             <SheepIcon className="mb-3 h-16 w-16 text-muted-foreground" />
@@ -755,12 +766,14 @@ function EmptyState() {
             <p className="mt-1 text-sm text-muted-foreground">
                 Connect a GitHub account to start tracking your activity.
             </p>
-            <Button asChild className="mt-4" size="sm">
-                <a href={redirect.url()}>
-                    <Plus className="h-4 w-4" />
-                    Connect GitHub
-                </a>
-            </Button>
+            {canManageConnections && (
+                <Button asChild className="mt-4" size="sm">
+                    <a href={redirect.url()}>
+                        <Plus className="h-4 w-4" />
+                        Connect GitHub
+                    </a>
+                </Button>
+            )}
         </section>
     );
 }
@@ -769,10 +782,12 @@ function ConnectedAccounts({
     installations,
     selectedInstallationIdSet,
     onToggleInstallation,
+    canManageConnections,
 }: {
     installations: GitHubInstallation[];
     selectedInstallationIdSet: Set<number>;
     onToggleInstallation: (installationId: number, checked: boolean) => void;
+    canManageConnections: boolean;
 }) {
     return (
         <ul className="divide-y divide-border rounded-md border">
@@ -820,24 +835,26 @@ function ConnectedAccounts({
                         <SyncStatusBadge installation={installation} />
                     </div>
 
-                    <Form
-                        {...destroy.form({
-                            installation: installation.id,
-                        })}
-                    >
-                        {({ processing }) => (
-                            <Button
-                                type="submit"
-                                variant="ghost"
-                                size="sm"
-                                disabled={processing}
-                                className="text-destructive hover:text-destructive"
-                            >
-                                <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">Disconnect</span>
-                            </Button>
-                        )}
-                    </Form>
+                    {canManageConnections && (
+                        <Form
+                            {...destroy.form({
+                                installation: installation.id,
+                            })}
+                        >
+                            {({ processing }) => (
+                                <Button
+                                    type="submit"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={processing}
+                                    className="text-destructive hover:text-destructive"
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                    <span className="sr-only">Disconnect</span>
+                                </Button>
+                            )}
+                        </Form>
+                    )}
                 </li>
             ))}
         </ul>

@@ -42,6 +42,7 @@ final readonly class GitHubAppController
         $displayTimezone = $this->displayTimezone($request);
 
         return Inertia::render('settings/github/index', [
+            'canManageConnections' => $request->routeIs('github-apps.index'),
             'installations' => $installations,
             'selectedInstallationIds' => $selectedInstallationIds,
             'aggregationTimezone' => $displayTimezone,

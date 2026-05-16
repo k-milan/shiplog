@@ -13,11 +13,12 @@ use App\Http\Controllers\UserPasswordController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\UserTwoFactorAuthenticationController;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::get('/', [GitHubAppController::class, 'index'])->name('home');
 
 // GitHub App Installations...
-Route::get('settings/github', [GitHubAppController::class, 'index'])
+Route::get('admin', [GitHubAppController::class, 'index'])
     ->name('github-apps.index');
 Route::get('github/redirect', [GitHubAppController::class, 'redirect'])
     ->name('github-apps.redirect');

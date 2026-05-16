@@ -25,15 +25,17 @@ it('renders github settings page', function (): void {
     $response->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('settings/github/index')
+            ->where('canManageConnections', true)
             ->has('installations'));
 });
 
-it('renders github settings page from the home page', function (): void {
+it('renders github settings page from the home page without manage connections', function (): void {
     $response = $this->get(route('home'));
 
     $response->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('settings/github/index')
+            ->where('canManageConnections', false)
             ->has('installations'));
 });
 

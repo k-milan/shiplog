@@ -1,10 +1,10 @@
+import AppearanceToggleTab from '@/components/appearance-tabs';
+import SheepIcon from '@/components/sheep-icon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChartContainer } from '@/components/ui/chart';
 import { Checkbox } from '@/components/ui/checkbox';
-import AppearanceToggleTab from '@/components/appearance-tabs';
-import SheepIcon from '@/components/sheep-icon';
 import {
     Dialog,
     DialogContent,
@@ -38,8 +38,8 @@ import {
 } from '@inertiajs/react';
 import {
     Check,
-    GitMerge,
     GitCommitHorizontal,
+    GitMerge,
     GitPullRequest,
     ListChecks,
     MessageSquareText,
@@ -304,6 +304,38 @@ interface Props extends Record<string, unknown> {
     status?: string;
 }
 
+function ActivityPoller({
+    selectedInstallationIds,
+    displayTimezone,
+}: {
+    selectedInstallationIds: number[];
+    displayTimezone: string;
+}) {
+    usePoll(10000, {
+        only: [
+            'installations',
+            'last24HoursSummary',
+            'pullRequestStatusItems',
+            'pullRequestsToReviewItems',
+            'last7DaysActivity',
+            'activityHeatmap',
+            'todayActivityByRepository',
+            'activityItems',
+        ],
+        headers: {
+            'X-Inertia-Infinite-Scroll-Merge-Intent': 'prepend',
+        },
+        data: {
+            account_filter: 1,
+            selected_installations: selectedInstallationIds,
+            timezone: displayTimezone,
+            activity: 1,
+        },
+    });
+
+    return null;
+}
+
 export default function GitHubIndex({
     canManageConnections = false,
     installations = [],
@@ -353,28 +385,6 @@ export default function GitHubIndex({
         (installation) => installation.sync_status === 'failed',
     );
 
-    usePoll(10000, {
-        only: [
-            'installations',
-            'last24HoursSummary',
-            'pullRequestStatusItems',
-            'pullRequestsToReviewItems',
-            'last7DaysActivity',
-            'activityHeatmap',
-            'todayActivityByRepository',
-            'activityItems',
-        ],
-        headers: {
-            'X-Inertia-Infinite-Scroll-Merge-Intent': 'prepend',
-        },
-        data: {
-            account_filter: 1,
-            selected_installations: selectedInstallationIds,
-            timezone: displayTimezone,
-            activity: 1,
-        },
-    });
-
     useEffect(() => {
         if (aggregationTimezone === displayTimezone) {
             return;
@@ -396,11 +406,7 @@ export default function GitHubIndex({
                 timezone: displayTimezone,
             },
         });
-    }, [
-        aggregationTimezone,
-        displayTimezone,
-        selectedInstallationIds,
-    ]);
+    }, [aggregationTimezone, displayTimezone, selectedInstallationIds]);
 
     useEffect(() => {
         setSelectedInstallationIds(initialSelectedInstallationIds);
@@ -427,6 +433,11 @@ export default function GitHubIndex({
                 } as React.CSSProperties
             }
         >
+            <ActivityPoller
+                key={`${displayTimezone}:${selectedInstallationIds.join(',')}`}
+                selectedInstallationIds={selectedInstallationIds}
+                displayTimezone={displayTimezone}
+            />
             <Head />
 
             <TopNav
@@ -439,7 +450,7 @@ export default function GitHubIndex({
                 canManageConnections={canManageConnections}
             />
 
-            <div className="mx-auto flex min-h-screen w-full min-w-0 max-w-6xl flex-col px-4 pt-4 pb-10 sm:px-6">
+            <div className="mx-auto flex min-h-screen w-full max-w-6xl min-w-0 flex-col px-4 pt-4 pb-10 sm:px-6">
                 <div className="min-w-0 space-y-6">
                     {status === 'github-app-connected' && (
                         <StatusMessage variant="success">
@@ -469,20 +480,23 @@ export default function GitHubIndex({
                     )}
 
                     {installations.length === 0 ? (
-                        <EmptyState canManageConnections={canManageConnections} />
+                        <EmptyState
+                            canManageConnections={canManageConnections}
+                        />
                     ) : (
                         <>
                             {hasSyncInProgress && (
                                 <StatusMessage>
-                                    GitHub sync is running. Keep the queue worker
-                                    on while we pull the last month of activity.
+                                    GitHub sync is running. Keep the queue
+                                    worker on while we pull the last month of
+                                    activity.
                                 </StatusMessage>
                             )}
 
                             {hasFailedSync && (
                                 <StatusMessage variant="error">
-                                    One GitHub sync failed. The account row shows
-                                    the latest error from the queued job.
+                                    One GitHub sync failed. The account row
+                                    shows the latest error from the queued job.
                                 </StatusMessage>
                             )}
 
@@ -499,7 +513,9 @@ export default function GitHubIndex({
                             />
 
                             <ActivityDashboardGrid
-                                selectedInstallationIds={selectedInstallationIds}
+                                selectedInstallationIds={
+                                    selectedInstallationIds
+                                }
                                 displayTimezone={displayTimezone}
                                 pullRequests={pullRequestStatusItems}
                                 reviewRequests={pullRequestsToReviewItems}
@@ -661,7 +677,9 @@ function AccountsDialog({
                     ) : (
                         <ConnectedAccounts
                             installations={installations}
-                            selectedInstallationIdSet={selectedInstallationIdSet}
+                            selectedInstallationIdSet={
+                                selectedInstallationIdSet
+                            }
                             onToggleInstallation={toggleInstallation}
                             canManageConnections={canManageConnections}
                         />
@@ -756,7 +774,11 @@ function SettingsDialog({
     );
 }
 
-function EmptyState({ canManageConnections }: { canManageConnections: boolean }) {
+function EmptyState({
+    canManageConnections,
+}: {
+    canManageConnections: boolean;
+}) {
     return (
         <section className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
             <SheepIcon className="mb-3 h-16 w-16 text-muted-foreground" />
@@ -910,7 +932,6 @@ function Last24HoursSummaryCards({
     summary: Last24HoursSummary;
     repositories: RepositoryActivityPartition[];
 }) {
-
     return (
         <section className="space-y-3">
             <h2 className="font-mono text-sm font-semibold">Last 24h</h2>
@@ -921,9 +942,8 @@ function Last24HoursSummaryCards({
                         <span className="inline-flex flex-wrap items-baseline gap-x-1">
                             <span>{summary.activities}</span>
                             <span
-                                className={`inline-flex items-center gap-0.5 font-mono text-[0.65rem] font-medium leading-none ${
-                                    summary.activities_change_direction ===
-                                    'up'
+                                className={`inline-flex items-center gap-0.5 font-mono text-[0.65rem] leading-none font-medium ${
+                                    summary.activities_change_direction === 'up'
                                         ? 'text-emerald-500'
                                         : summary.activities_change_direction ===
                                             'down'
@@ -1030,68 +1050,70 @@ function PullRequestStatusPanel({
             </div>
 
             <div className="min-h-0 flex-1">
-            {pullRequests.length === 0 ? (
-                <PullRequestPanelEmptyState
-                    icon={<GitPullRequest className="h-6 w-6" />}
-                >
-                    No open or recently merged PRs for selected accounts.
-                </PullRequestPanelEmptyState>
-            ) : (
-                <TooltipProvider delayDuration={100}>
+                {pullRequests.length === 0 ? (
+                    <PullRequestPanelEmptyState
+                        icon={<GitPullRequest className="h-6 w-6" />}
+                    >
+                        No open or recently merged PRs for selected accounts.
+                    </PullRequestPanelEmptyState>
+                ) : (
+                    <TooltipProvider delayDuration={100}>
                         <ScrollFade
                             axis="vertical"
                             intensity={0.85}
                             className="h-full"
                         >
-                    <div className="grid gap-1.5">
-                        {pullRequests.map((pullRequest) => (
-                            <a
-                                key={pullRequest.id}
-                                href={pullRequest.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="group grid grid-cols-[1rem_minmax(0,1fr)] gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--sheep-accent-soft)]"
-                            >
-                        <PullRequestStatusIndicator status={pullRequest.status} />
+                            <div className="grid gap-1.5">
+                                {pullRequests.map((pullRequest) => (
+                                    <a
+                                        key={pullRequest.id}
+                                        href={pullRequest.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="group grid grid-cols-[1rem_minmax(0,1fr)] gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--sheep-accent-soft)]"
+                                    >
+                                        <PullRequestStatusIndicator
+                                            status={pullRequest.status}
+                                        />
 
-                        <div className="min-w-0">
-                            <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
-                                <Badge
-                                    variant="outline"
-                                    className="h-4 max-w-full rounded-sm border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--sheep-accent)]"
-                                    title={
-                                        pullRequest.repository ??
-                                        'Unknown repo'
-                                    }
-                                >
-                                {pullRequest.repository
-                                    ? shortRepositoryName(
-                                          pullRequest.repository,
-                                      )
-                                    : 'Unknown repo'}
-                                </Badge>
-                                <span className="text-xs text-muted-foreground">
-                                    #{pullRequest.number}
-                                    {pullRequest.merged_at
-                                        ? ` · ${formatRelativeTime(pullRequest.merged_at)}`
-                                        : pullRequest.updated_at
-                                          ? ` · ${formatRelativeTime(pullRequest.updated_at)}`
-                                          : ''}
-                                </span>
+                                        <div className="min-w-0">
+                                            <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
+                                                <Badge
+                                                    variant="outline"
+                                                    className="h-4 max-w-full rounded-sm border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--sheep-accent)]"
+                                                    title={
+                                                        pullRequest.repository ??
+                                                        'Unknown repo'
+                                                    }
+                                                >
+                                                    {pullRequest.repository
+                                                        ? shortRepositoryName(
+                                                              pullRequest.repository,
+                                                          )
+                                                        : 'Unknown repo'}
+                                                </Badge>
+                                                <span className="text-xs text-muted-foreground">
+                                                    #{pullRequest.number}
+                                                    {pullRequest.merged_at
+                                                        ? ` · ${formatRelativeTime(pullRequest.merged_at)}`
+                                                        : pullRequest.updated_at
+                                                          ? ` · ${formatRelativeTime(pullRequest.updated_at)}`
+                                                          : ''}
+                                                </span>
+                                            </div>
+                                            <p
+                                                className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:underline"
+                                                title={pullRequest.title}
+                                            >
+                                                {pullRequest.title}
+                                            </p>
+                                        </div>
+                                    </a>
+                                ))}
                             </div>
-                            <p
-                                className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:underline"
-                                title={pullRequest.title}
-                            >
-                                {pullRequest.title}
-                            </p>
-                        </div>
-                    </a>
-                ))}
-                    </div>
                         </ScrollFade>
-                </TooltipProvider>
-            )}
+                    </TooltipProvider>
+                )}
             </div>
         </section>
     );
@@ -1114,62 +1136,63 @@ function PullRequestsToReviewPanel({
             </div>
 
             <div className="min-h-0 flex-1">
-            {reviewRequests.length === 0 ? (
-                <PullRequestPanelEmptyState
-                    icon={<ListChecks className="h-6 w-6" />}
-                >
-                    No open PRs are requesting review from selected accounts.
-                </PullRequestPanelEmptyState>
-            ) : (
+                {reviewRequests.length === 0 ? (
+                    <PullRequestPanelEmptyState
+                        icon={<ListChecks className="h-6 w-6" />}
+                    >
+                        No open PRs are requesting review from selected
+                        accounts.
+                    </PullRequestPanelEmptyState>
+                ) : (
                     <ScrollFade
                         axis="vertical"
                         intensity={0.85}
                         className="h-full"
                     >
-                <div className="grid gap-1.5">
-                    {reviewRequests.map((pullRequest) => (
-                        <a
-                            key={pullRequest.id}
-                            href={pullRequest.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="group block rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--sheep-accent-soft)]"
-                        >
-                            <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
-                                <Badge
-                                    variant="outline"
-                                    className="h-4 max-w-full rounded-sm border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--sheep-accent)]"
-                                    title={
-                                        pullRequest.repository ??
-                                        'Unknown repo'
-                                    }
+                        <div className="grid gap-1.5">
+                            {reviewRequests.map((pullRequest) => (
+                                <a
+                                    key={pullRequest.id}
+                                    href={pullRequest.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="group block rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--sheep-accent-soft)]"
                                 >
-                                    {pullRequest.repository
-                                        ? shortRepositoryName(
-                                              pullRequest.repository,
-                                          )
-                                        : 'Unknown repo'}
-                                </Badge>
-                                <span className="min-w-0 text-xs text-muted-foreground">
-                                    {pullRequest.author
-                                        ? `By ${pullRequest.author}`
-                                        : 'Unknown author'}
-                                    {pullRequest.updated_at
-                                        ? ` · ${formatRelativeTime(pullRequest.updated_at)}`
-                                        : ''}
-                                </span>
-                            </div>
-                            <p
-                                className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:underline"
-                                title={pullRequest.title}
-                            >
-                                {pullRequest.title}
-                            </p>
-                        </a>
-                    ))}
-                </div>
+                                    <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-2">
+                                        <Badge
+                                            variant="outline"
+                                            className="h-4 max-w-full rounded-sm border-[var(--sheep-accent-border)] bg-[var(--sheep-accent-soft)] px-1.5 font-mono text-[0.6rem] leading-none text-[var(--sheep-accent)]"
+                                            title={
+                                                pullRequest.repository ??
+                                                'Unknown repo'
+                                            }
+                                        >
+                                            {pullRequest.repository
+                                                ? shortRepositoryName(
+                                                      pullRequest.repository,
+                                                  )
+                                                : 'Unknown repo'}
+                                        </Badge>
+                                        <span className="min-w-0 text-xs text-muted-foreground">
+                                            {pullRequest.author
+                                                ? `By ${pullRequest.author}`
+                                                : 'Unknown author'}
+                                            {pullRequest.updated_at
+                                                ? ` · ${formatRelativeTime(pullRequest.updated_at)}`
+                                                : ''}
+                                        </span>
+                                    </div>
+                                    <p
+                                        className="line-clamp-1 font-mono text-xs leading-snug font-medium group-hover:underline"
+                                        title={pullRequest.title}
+                                    >
+                                        {pullRequest.title}
+                                    </p>
+                                </a>
+                            ))}
+                        </div>
                     </ScrollFade>
-            )}
+                )}
             </div>
         </section>
     );
@@ -1231,7 +1254,10 @@ function pullRequestStatusDetails(status: string): {
 
     if (status === 'changes requested' || status === 'commented') {
         return {
-            label: status === 'changes requested' ? 'Changes requested' : 'Has comments',
+            label:
+                status === 'changes requested'
+                    ? 'Changes requested'
+                    : 'Has comments',
             className:
                 'border-amber-400/50 bg-amber-400/15 text-amber-400 shadow-[0_0_6px_rgb(251_191_36_/_0.35)]',
             icon: <MessageSquareText className={iconClassName} />,
@@ -1345,9 +1371,7 @@ function ActivityDashboardGrid({
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
             <div
                 className="order-3 h-96 min-h-0 min-w-0 shrink-0 overflow-hidden lg:order-1 lg:w-1/2"
-                style={
-                    feedHeight !== null ? { height: feedHeight } : undefined
-                }
+                style={feedHeight !== null ? { height: feedHeight } : undefined}
             >
                 <ActivityFeedPanel
                     selectedInstallationIds={selectedInstallationIds}

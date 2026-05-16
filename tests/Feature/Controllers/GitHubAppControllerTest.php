@@ -138,6 +138,85 @@ it('paginates activity items ten at a time', function (): void {
             ->where('activityItems.data.0.title', 'Commit 11'));
 });
 
+it('shows organization installation activity from repository contributors', function (): void {
+    $installation = GitHubAppInstallation::factory()->create([
+        'account_login' => 'myorg',
+        'account_type' => 'Organization',
+    ]);
+    $repository = GitHubRepository::query()->create([
+        'github_app_installation_id' => $installation->id,
+        'github_id' => 1001,
+        'name' => 'demo',
+        'full_name' => 'myorg/demo',
+        'owner_login' => 'myorg',
+        'private' => false,
+        'default_branch' => 'main',
+        'html_url' => 'https://github.com/myorg/demo',
+    ]);
+
+    GitHubCommit::query()->create([
+        'github_repository_id' => $repository->id,
+        'sha' => 'sha-from-contributor',
+        'message' => 'Contributor commit',
+        'author_login' => 'octocat',
+        'authored_at' => Carbon\CarbonImmutable::now('UTC')->subMinute(),
+        'html_url' => 'https://github.com/myorg/demo/commit/sha-from-contributor',
+    ]);
+
+    $response = $this->get(route('github-apps.index'));
+
+    $response->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('activityItems.data', 1)
+            ->where('activityItems.data.0.title', 'Contributor commit')
+            ->where('activityItems.data.0.actor', 'octocat')
+            ->where('last24HoursSummary.activities', 1));
+});
+
+it('filters personal connected account activity by actor login', function (): void {
+    $installation = GitHubAppInstallation::factory()->create([
+        'account_login' => 'octocat',
+        'account_type' => 'User',
+    ]);
+    $repository = GitHubRepository::query()->create([
+        'github_app_installation_id' => $installation->id,
+        'github_id' => 1001,
+        'name' => 'demo',
+        'full_name' => 'octocat/demo',
+        'owner_login' => 'octocat',
+        'private' => false,
+        'default_branch' => 'main',
+        'html_url' => 'https://github.com/octocat/demo',
+    ]);
+
+    GitHubCommit::query()->create([
+        'github_repository_id' => $repository->id,
+        'sha' => 'sha-from-octocat',
+        'message' => 'Connected account commit',
+        'author_login' => 'octocat',
+        'authored_at' => Carbon\CarbonImmutable::now('UTC')->subMinute(),
+        'html_url' => 'https://github.com/octocat/demo/commit/sha-from-octocat',
+    ]);
+
+    GitHubCommit::query()->create([
+        'github_repository_id' => $repository->id,
+        'sha' => 'sha-from-someone-else',
+        'message' => 'Other contributor commit',
+        'author_login' => 'someone-else',
+        'authored_at' => Carbon\CarbonImmutable::now('UTC')->subSeconds(30),
+        'html_url' => 'https://github.com/octocat/demo/commit/sha-from-someone-else',
+    ]);
+
+    $response = $this->get(route('github-apps.index'));
+
+    $response->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('activityItems.data', 1)
+            ->where('activityItems.data.0.title', 'Connected account commit')
+            ->where('activityItems.data.0.actor', 'octocat')
+            ->where('last24HoursSummary.activities', 1));
+});
+
 it('compares last twenty four hour activities against the previous day window', function (): void {
     $now = Carbon\CarbonImmutable::parse('2026-05-14 12:00:00', 'UTC');
     $this->travelTo($now);

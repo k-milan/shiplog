@@ -38,7 +38,7 @@ final readonly class GitHubAppController
             ->orderBy('account_login')
             ->get(['id', 'installation_id', 'account_login', 'account_type', 'account_name', 'avatar_url', 'sync_status', 'sync_started_at', 'sync_finished_at', 'sync_error', 'created_at']);
         $selectedInstallationIds = $this->selectedInstallationIds($request, $installations->pluck('id')->all());
-        $selectedActorLogins = $this->selectedActorLogins($selectedInstallationIds);
+        $activityScope = $this->activityScope($selectedInstallationIds);
         $displayTimezone = $this->displayTimezone($request);
 
         return Inertia::render('settings/github/index', [
@@ -46,15 +46,14 @@ final readonly class GitHubAppController
             'installations' => $installations,
             'selectedInstallationIds' => $selectedInstallationIds,
             'aggregationTimezone' => $displayTimezone,
-            'last24HoursSummary' => $this->last24HoursSummary($selectedInstallationIds, $selectedActorLogins),
+            'last24HoursSummary' => $this->last24HoursSummary($activityScope),
             'pullRequestStatusItems' => $this->pullRequestStatusItems($selectedInstallationIds, $displayTimezone),
             'pullRequestsToReviewItems' => $this->pullRequestsToReviewItems($selectedInstallationIds),
-            'last7DaysActivity' => $this->last7DaysActivity($selectedInstallationIds, $selectedActorLogins, $displayTimezone),
-            'activityHeatmap' => $this->activityHeatmap($selectedInstallationIds, $selectedActorLogins, $displayTimezone),
-            'todayActivityByRepository' => $this->todayActivityByRepository($selectedInstallationIds, $selectedActorLogins, $displayTimezone),
+            'last7DaysActivity' => $this->last7DaysActivity($activityScope, $displayTimezone),
+            'activityHeatmap' => $this->activityHeatmap($activityScope, $displayTimezone),
+            'todayActivityByRepository' => $this->todayActivityByRepository($activityScope, $displayTimezone),
             'activityItems' => Inertia::scroll($this->activityItems(
-                $selectedInstallationIds,
-                $selectedActorLogins,
+                $activityScope,
                 $this->activityPage($request),
             ))
                 ->append('data', 'id'),
@@ -161,15 +160,14 @@ final readonly class GitHubAppController
     /**
      * @return LengthAwarePaginator<int, array{id: string, type: string, occurred_at: string|null, title: string, actor: string|null, repository: string|null, reference: string|null, url: string|null, state: string|null}>
      */
-    private function activityItems(array $installationIds, array $actorLogins, int $page): LengthAwarePaginator
+    private function activityItems(array $activityScope, int $page): LengthAwarePaginator
     {
         $pageName = 'activity';
         $perPage = 10;
 
         $commits = DB::table('github_commits as commits')
             ->join('github_repositories as repositories', 'repositories.id', '=', 'commits.github_repository_id')
-            ->whereIn('repositories.github_app_installation_id', $installationIds)
-            ->whereIn('commits.author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyDbActivityScope($query, $activityScope, 'repositories', 'commits.author_login'))
             ->select([
                 'commits.id as source_id',
                 DB::raw("'commit' as type"),
@@ -184,8 +182,7 @@ final readonly class GitHubAppController
 
         $pullRequests = DB::table('github_pull_requests as pull_requests')
             ->join('github_repositories as repositories', 'repositories.id', '=', 'pull_requests.github_repository_id')
-            ->whereIn('repositories.github_app_installation_id', $installationIds)
-            ->whereIn('pull_requests.author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyDbActivityScope($query, $activityScope, 'repositories', 'pull_requests.author_login'))
             ->select([
                 'pull_requests.id as source_id',
                 DB::raw("'pull_request' as type"),
@@ -201,8 +198,7 @@ final readonly class GitHubAppController
         $reviews = DB::table('github_pull_request_reviews as reviews')
             ->join('github_pull_requests as pull_requests', 'pull_requests.id', '=', 'reviews.github_pull_request_id')
             ->join('github_repositories as repositories', 'repositories.id', '=', 'pull_requests.github_repository_id')
-            ->whereIn('repositories.github_app_installation_id', $installationIds)
-            ->whereIn('reviews.author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyDbActivityScope($query, $activityScope, 'repositories', 'reviews.author_login'))
             ->select([
                 'reviews.id as source_id',
                 DB::raw("'review' as type"),
@@ -389,25 +385,23 @@ final readonly class GitHubAppController
      *     production_deploys: int|null
      * }
      */
-    private function last24HoursSummary(array $installationIds, array $actorLogins): array
+    private function last24HoursSummary(array $activityScope): array
     {
         $now = CarbonImmutable::now('UTC');
         $since = $now->subDay();
         $previousSince = $now->subDays(2);
 
-        $activities = $this->activityCountBetween($installationIds, $actorLogins, $since, $now);
-        $previousActivities = $this->activityCountBetween($installationIds, $actorLogins, $previousSince, $since);
+        $activities = $this->activityCountBetween($activityScope, $since, $now);
+        $previousActivities = $this->activityCountBetween($activityScope, $previousSince, $since);
 
         $commitRepositoryIds = GitHubCommit::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where('authored_at', '>=', $since)
             ->where('authored_at', '<', $now)
             ->pluck('github_repository_id');
 
         $pullRequests = GitHubPullRequest::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where(function ($query) use ($since, $now): void {
                 $query
                     ->where(function ($query) use ($since, $now): void {
@@ -430,8 +424,7 @@ final readonly class GitHubAppController
 
         $reviews = GitHubPullRequestReview::query()
             ->with('pullRequest:id,github_repository_id')
-            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'pullRequest.repository', 'author_login'))
             ->where('submitted_at', '>=', $since)
             ->where('submitted_at', '<', $now)
             ->get(['id', 'github_pull_request_id']);
@@ -455,21 +448,18 @@ final readonly class GitHubAppController
     }
 
     private function activityCountBetween(
-        array $installationIds,
-        array $actorLogins,
+        array $activityScope,
         CarbonImmutable $since,
         CarbonImmutable $until,
     ): int {
         $commitCount = GitHubCommit::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where('authored_at', '>=', $since)
             ->where('authored_at', '<', $until)
             ->count();
 
         $pullRequestCount = GitHubPullRequest::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where(function ($query) use ($since, $until): void {
                 $query
                     ->where(function ($query) use ($since, $until): void {
@@ -491,8 +481,7 @@ final readonly class GitHubAppController
             ->count();
 
         $reviewCount = GitHubPullRequestReview::query()
-            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'pullRequest.repository', 'author_login'))
             ->where('submitted_at', '>=', $since)
             ->where('submitted_at', '<', $until)
             ->count();
@@ -533,7 +522,7 @@ final readonly class GitHubAppController
     /**
      * @return list<array{date: string, label: string, total: int}>
      */
-    private function last7DaysActivity(array $installationIds, array $actorLogins, string $displayTimezone): array
+    private function last7DaysActivity(array $activityScope, string $displayTimezone): array
     {
         $start = $this->todayStart($displayTimezone)->subDays(6);
         $startUtc = $this->utcBoundary($start);
@@ -541,8 +530,7 @@ final readonly class GitHubAppController
             ->map(fn (int $offset): CarbonImmutable => $start->addDays($offset));
 
         $commits = GitHubCommit::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where('authored_at', '>=', $startUtc)
             ->get(['authored_at'])
             ->map(fn (GitHubCommit $commit): ?string => $this->dateStringInTimezone($commit->getRawOriginal('authored_at'), $displayTimezone))
@@ -550,8 +538,7 @@ final readonly class GitHubAppController
             ->countBy();
 
         $pullRequests = GitHubPullRequest::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where(function ($query) use ($startUtc): void {
                 $query
                     ->where('updated_at_github', '>=', $startUtc)
@@ -569,8 +556,7 @@ final readonly class GitHubAppController
             ->countBy();
 
         $reviews = GitHubPullRequestReview::query()
-            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'pullRequest.repository', 'author_login'))
             ->where('submitted_at', '>=', $startUtc)
             ->get(['submitted_at'])
             ->map(fn (GitHubPullRequestReview $review): ?string => $this->dateStringInTimezone($review->getRawOriginal('submitted_at'), $displayTimezone))
@@ -590,7 +576,7 @@ final readonly class GitHubAppController
     /**
      * @return array{start_date: string, end_date: string, total: int, data: list<array{date: string, value: int}>}
      */
-    private function activityHeatmap(array $installationIds, array $actorLogins, string $displayTimezone): array
+    private function activityHeatmap(array $activityScope, string $displayTimezone): array
     {
         $start = $this->todayStart($displayTimezone)->subMonths(6)->addDay();
         $end = $this->todayStart($displayTimezone);
@@ -599,8 +585,7 @@ final readonly class GitHubAppController
             ->map(fn (int $offset): CarbonImmutable => $start->addDays($offset));
 
         $commits = GitHubCommit::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where('authored_at', '>=', $startUtc)
             ->get(['authored_at'])
             ->map(fn (GitHubCommit $commit): ?string => $this->dateStringInTimezone($commit->getRawOriginal('authored_at'), $displayTimezone))
@@ -608,8 +593,7 @@ final readonly class GitHubAppController
             ->countBy();
 
         $pullRequests = GitHubPullRequest::query()
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where(function ($query) use ($startUtc): void {
                 $query
                     ->where('updated_at_github', '>=', $startUtc)
@@ -627,8 +611,7 @@ final readonly class GitHubAppController
             ->countBy();
 
         $reviews = GitHubPullRequestReview::query()
-            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'pullRequest.repository', 'author_login'))
             ->where('submitted_at', '>=', $startUtc)
             ->get(['submitted_at'])
             ->map(fn (GitHubPullRequestReview $review): ?string => $this->dateStringInTimezone($review->getRawOriginal('submitted_at'), $displayTimezone))
@@ -653,7 +636,7 @@ final readonly class GitHubAppController
     /**
      * @return list<array{repository: string, total: int}>
      */
-    private function todayActivityByRepository(array $installationIds, array $actorLogins, string $displayTimezone): array
+    private function todayActivityByRepository(array $activityScope, string $displayTimezone): array
     {
         $start = $this->todayStart($displayTimezone);
         $end = $start->addDay();
@@ -662,8 +645,7 @@ final readonly class GitHubAppController
 
         $commits = GitHubCommit::query()
             ->with('repository:id,full_name')
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where('authored_at', '>=', $startUtc)
             ->where('authored_at', '<', $endUtc)
             ->get(['id', 'github_repository_id', 'authored_at'])
@@ -672,8 +654,7 @@ final readonly class GitHubAppController
 
         $pullRequests = GitHubPullRequest::query()
             ->with('repository:id,full_name')
-            ->whereHas('repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'repository', 'author_login'))
             ->where(function ($query) use ($startUtc, $endUtc): void {
                 $query
                     ->whereBetween('updated_at_github', [$startUtc, $endUtc])
@@ -686,8 +667,7 @@ final readonly class GitHubAppController
 
         $reviews = GitHubPullRequestReview::query()
             ->with('pullRequest.repository:id,full_name')
-            ->whereHas('pullRequest.repository', fn ($query) => $query->whereIn('github_app_installation_id', $installationIds))
-            ->whereIn('author_login', $actorLogins)
+            ->tap(fn ($query) => $this->applyModelActivityScope($query, $activityScope, 'pullRequest.repository', 'author_login'))
             ->where('submitted_at', '>=', $startUtc)
             ->where('submitted_at', '<', $endUtc)
             ->get(['id', 'github_pull_request_id', 'submitted_at'])
@@ -725,17 +705,98 @@ final readonly class GitHubAppController
     }
 
     /**
-     * @param  list<int>  $installationIds
-     * @return list<string>
+     * @return array{organization_installation_ids: list<int>, user_installation_ids: list<int>, user_actor_logins: list<string>}
      */
-    private function selectedActorLogins(array $installationIds): array
+    private function activityScope(array $installationIds): array
     {
-        return GitHubAppInstallation::query()
+        $installations = GitHubAppInstallation::query()
             ->whereIn('id', $installationIds)
-            ->pluck('account_login')
-            ->filter()
-            ->values()
-            ->all();
+            ->get(['id', 'account_login', 'account_type']);
+
+        return [
+            'organization_installation_ids' => $installations
+                ->where('account_type', 'Organization')
+                ->pluck('id')
+                ->values()
+                ->all(),
+            'user_installation_ids' => $installations
+                ->reject(fn (GitHubAppInstallation $installation): bool => $installation->account_type === 'Organization')
+                ->pluck('id')
+                ->values()
+                ->all(),
+            'user_actor_logins' => $installations
+                ->reject(fn (GitHubAppInstallation $installation): bool => $installation->account_type === 'Organization')
+                ->pluck('account_login')
+                ->filter()
+                ->values()
+                ->all(),
+        ];
+    }
+
+    private function applyDbActivityScope(
+        mixed $query,
+        array $activityScope,
+        string $repositoryAlias,
+        string $authorColumn,
+    ): void {
+        $query->where(function ($query) use ($activityScope, $repositoryAlias, $authorColumn): void {
+            $hasOrganizationScope = $activityScope['organization_installation_ids'] !== [];
+            $hasUserScope = $activityScope['user_installation_ids'] !== [] && $activityScope['user_actor_logins'] !== [];
+
+            if ($hasOrganizationScope) {
+                $query->whereIn("{$repositoryAlias}.github_app_installation_id", $activityScope['organization_installation_ids']);
+            }
+
+            if ($hasUserScope) {
+                $method = $hasOrganizationScope ? 'orWhere' : 'where';
+
+                $query->{$method}(function ($query) use ($activityScope, $repositoryAlias, $authorColumn): void {
+                    $query
+                        ->whereIn("{$repositoryAlias}.github_app_installation_id", $activityScope['user_installation_ids'])
+                        ->whereIn($authorColumn, $activityScope['user_actor_logins']);
+                });
+            }
+
+            if (! $hasOrganizationScope && ! $hasUserScope) {
+                $query->whereRaw('1 = 0');
+            }
+        });
+    }
+
+    private function applyModelActivityScope(
+        mixed $query,
+        array $activityScope,
+        string $repositoryRelation,
+        string $authorColumn,
+    ): void {
+        $query->where(function ($query) use ($activityScope, $repositoryRelation, $authorColumn): void {
+            $hasOrganizationScope = $activityScope['organization_installation_ids'] !== [];
+            $hasUserScope = $activityScope['user_installation_ids'] !== [] && $activityScope['user_actor_logins'] !== [];
+
+            if ($hasOrganizationScope) {
+                $query->whereHas(
+                    $repositoryRelation,
+                    fn ($query) => $query->whereIn('github_app_installation_id', $activityScope['organization_installation_ids']),
+                );
+            }
+
+            if ($hasUserScope) {
+                $method = $hasOrganizationScope ? 'orWhere' : 'where';
+
+                $query->{$method}(function ($query) use ($activityScope, $repositoryRelation, $authorColumn): void {
+                    $query
+                        ->whereHas(
+                            $repositoryRelation,
+                            fn ($query) => $query->whereIn('github_app_installation_id', $activityScope['user_installation_ids']),
+                        )
+                        ->whereIn($authorColumn, $activityScope['user_actor_logins']);
+                });
+            }
+
+            if (! $hasOrganizationScope && ! $hasUserScope) {
+                $query->whereRaw('1 = 0');
+            }
+        });
     }
 
     private function activityPage(Request $request): int
